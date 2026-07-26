@@ -1,0 +1,57 @@
+telegram:
+  bot_token: ${TELEGRAM_BOT_TOKEN}
+  chat_id: ${TELEGRAM_CHAT_ID}
+
+searches:
+  # LinkedIn + Google: hours_old is safe here, keeps results fresh and cuts
+  # how many pages get hit (LinkedIn rate limits hard after ~page 10 on one IP)
+  - name: backend_li_google
+    site_name: [linkedin, google]
+    search_term: "backend engineer"
+    google_search_term: "backend engineer jobs India remote"
+    location: "India"
+    is_remote: true
+    job_type: fulltime
+    hours_old: 24
+    results_wanted: 40
+
+  - name: go_developer_li_google
+    site_name: [linkedin, google]
+    search_term: "Go developer backend"
+    google_search_term: "Go backend developer jobs India remote"
+    location: "India"
+    is_remote: true
+    job_type: fulltime
+    hours_old: 24
+    results_wanted: 30
+
+  - name: python_backend_li_google
+    site_name: [linkedin, google]
+    search_term: "Python backend engineer FastAPI"
+    google_search_term: "Python backend engineer jobs India remote"
+    location: "India"
+    is_remote: true
+    job_type: fulltime
+    hours_old: 24
+    results_wanted: 30
+
+  - name: ai_llm_li_google
+    site_name: [linkedin, google]
+    search_term: "LLM AI engineer backend"
+    google_search_term: "LLM AI engineer jobs India remote"
+    location: "India"
+    is_remote: true
+    job_type: fulltime
+    hours_old: 24
+    results_wanted: 30
+
+  # Indeed: no hours_old (conflicts with job_type/is_remote), country_indeed
+  # is required, one boolean search_term covers all four role variants.
+  - name: backend_indeed
+    site_name: [indeed]
+    search_term: 'backend engineer (golang OR python OR "machine learning" OR llm) fulltime remote'
+    location: "India"
+    country_indeed: "India"
+    is_remote: true
+    job_type: fulltime
+    results_wanted: 60
