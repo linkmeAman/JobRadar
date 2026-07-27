@@ -134,9 +134,7 @@ def format_job_message(row: pd.Series) -> str:
     lines.append(f"🔗 {job_url}")
     job_id = _value(row, "job_id")
     if _is_present(job_id):
-        short_id = str(job_id)[:12]
-        lines.append(f"🆔 {short_id}")
-        lines.append(f"✅ /applied {short_id}")
+        lines.append(f"🆔 {str(job_id)[:12]}")
     return "\n".join(lines)
 
 

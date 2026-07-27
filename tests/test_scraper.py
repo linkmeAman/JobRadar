@@ -16,8 +16,7 @@ jobspy_stub = types.ModuleType("jobspy")
 jobspy_stub.scrape_jobs = lambda **_params: pd.DataFrame()
 sys.modules.setdefault("jobspy", jobspy_stub)
 
-import scraper
-import scrape_state
+from job_radar import scrape_state, scraper
 
 
 class ScraperTests(unittest.TestCase):
@@ -68,7 +67,7 @@ class ScraperTests(unittest.TestCase):
                 [{"title": "Backend Engineer", "company": "Acme", "site": site}]
             )
 
-        with patch("scraper.scrape_jobs", side_effect=fake_scrape_jobs):
+        with patch("job_radar.scraper.scrape_jobs", side_effect=fake_scrape_jobs):
             jobs = scraper.run_all(self.searches)
 
         self.assertEqual(len(jobs), 2)
@@ -96,7 +95,7 @@ class ScraperTests(unittest.TestCase):
                 raise RuntimeError("HTTP 429 Too Many Requests")
             return pd.DataFrame()
 
-        with patch("scraper.scrape_jobs", side_effect=fake_scrape_jobs):
+        with patch("job_radar.scraper.scrape_jobs", side_effect=fake_scrape_jobs):
             scraper.run_all(self.searches[:1])
             scraper.run_all(self.searches[:1])
 
@@ -104,7 +103,7 @@ class ScraperTests(unittest.TestCase):
         self.assertEqual(calls.count("google"), 2)
 
     def test_dry_run_returns_report_without_writing_state(self) -> None:
-        with patch("scraper.scrape_jobs", return_value=pd.DataFrame()):
+        with patch("job_radar.scraper.scrape_jobs", return_value=pd.DataFrame()):
             outcome = scraper.run_all(
                 self.searches[:1],
                 persist_state=False,

@@ -11,17 +11,19 @@ from typing import Any, Sequence
 import pandas as pd
 import yaml
 
-import application_tracker
-import dedupe
-import matcher
-import notifier
-import resume_profile
-import run_lock
-import scrape_state
-import scraper
-import search_generator
-import semantic
-from sources import runner as source_runner
+from . import (
+    application_tracker,
+    dedupe,
+    matcher,
+    notifier,
+    resume_profile,
+    run_lock,
+    scrape_state,
+    scraper,
+    search_generator,
+    semantic,
+)
+from .sources import runner as source_runner
 
 
 CONFIG_PATH = Path("config.yaml")
@@ -337,7 +339,9 @@ def _maybe_send_health_alert(
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Resume-aware job scraping")
+    parser = argparse.ArgumentParser(
+        prog="job-radar", description="Resume-aware job scraping"
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",

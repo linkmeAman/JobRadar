@@ -6,4 +6,4 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=/opt/job-radar
 EnvironmentFile=/opt/job-radar/.env
-ExecStart=/opt/job-radar/.venv/bin/python main.py
+ExecStart=/opt/job-radar/.venv/bin/python -m job_radar.main

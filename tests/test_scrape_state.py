@@ -7,7 +7,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import scrape_state
+from job_radar import scrape_state
 
 
 class ScrapeStateTests(unittest.TestCase):

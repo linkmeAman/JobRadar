@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import pandas as pd
 
-import scrape_state
-from sources import cutshort, hacker_news, hirist, runner
+from job_radar import scrape_state
+from job_radar.sources import cutshort, hacker_news, hirist, runner
 
 
 FIXTURES = Path(__file__).parent / "fixtures"

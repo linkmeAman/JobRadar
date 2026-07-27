@@ -15,8 +15,7 @@ jobspy_stub = types.ModuleType("jobspy")
 jobspy_stub.scrape_jobs = lambda **_params: pd.DataFrame()
 sys.modules.setdefault("jobspy", jobspy_stub)
 
-import main
-import scraper
+from job_radar import main, scraper
 
 
 def _config() -> dict:
@@ -61,40 +60,40 @@ class MainTests(unittest.TestCase):
             scraped, {"google": {"status": "success", "results": 1}}
         )
 
-        with patch("main.load_config", return_value=config), patch(
-            "main.run_lock.single_instance", return_value=nullcontext()
+        with patch("job_radar.main.load_config", return_value=config), patch(
+            "job_radar.main.run_lock.single_instance", return_value=nullcontext()
         ), patch(
-            "main.notifier.validate_delivery_target"
+            "job_radar.main.notifier.validate_delivery_target"
         ), patch(
-            "main.application_tracker.run_automation",
+            "job_radar.main.application_tracker.run_automation",
             return_value=(1, 2),
         ) as application_automation, patch(
-            "main.resume_profile.load_or_refresh",
+            "job_radar.main.resume_profile.load_or_refresh",
             return_value={"skills": ["python"], "roles": ["backend engineer"]},
         ), patch(
-            "main._selected_searches", return_value=config["searches"]
+            "job_radar.main._selected_searches", return_value=config["searches"]
         ), patch(
-            "main.scrape_state.start_run", return_value=7
+            "job_radar.main.scrape_state.start_run", return_value=7
         ), patch(
-            "main.scraper.run_all", return_value=outcome
+            "job_radar.main.scraper.run_all", return_value=outcome
         ), patch(
-            "main.dedupe.feedback_adjustments", return_value={}
+            "job_radar.main.dedupe.feedback_adjustments", return_value={}
         ), patch(
-            "main.matcher.evaluate_jobs", return_value=evaluated
+            "job_radar.main.matcher.evaluate_jobs", return_value=evaluated
         ), patch(
-            "main.matcher.select_matches", return_value=evaluated
+            "job_radar.main.matcher.select_matches", return_value=evaluated
         ), patch(
-            "main.dedupe.filter_new", return_value=evaluated
+            "job_radar.main.dedupe.filter_new", return_value=evaluated
         ), patch(
-            "main.dedupe.expire_pending", return_value=0
+            "job_radar.main.dedupe.expire_pending", return_value=0
         ), patch(
-            "main.dedupe.pending_notifications", return_value=pending
+            "job_radar.main.dedupe.pending_notifications", return_value=pending
         ), patch(
-            "main.notifier.send_all", return_value=10
+            "job_radar.main.notifier.send_all", return_value=10
         ) as send_all, patch(
-            "main.scrape_state.complete_run"
+            "job_radar.main.scrape_state.complete_run"
         ) as complete, patch(
-            "main._maybe_send_health_alert"
+            "job_radar.main._maybe_send_health_alert"
         ):
             main.main([])
 
@@ -130,34 +129,34 @@ class MainTests(unittest.TestCase):
             matched=True,
         )
 
-        with patch("main.load_config", return_value=config), patch(
-            "main.run_lock.single_instance", return_value=nullcontext()
+        with patch("job_radar.main.load_config", return_value=config), patch(
+            "job_radar.main.run_lock.single_instance", return_value=nullcontext()
         ), patch(
-            "main.notifier.validate_delivery_target"
+            "job_radar.main.notifier.validate_delivery_target"
         ) as validate, patch(
-            "main.resume_profile.load_or_refresh",
+            "job_radar.main.resume_profile.load_or_refresh",
             return_value={"skills": ["python"], "roles": ["backend engineer"]},
         ), patch(
-            "main._selected_searches", return_value=config["searches"]
+            "job_radar.main._selected_searches", return_value=config["searches"]
         ), patch(
-            "main.scraper.run_all", return_value=outcome
+            "job_radar.main.scraper.run_all", return_value=outcome
         ) as run_all, patch(
-            "main.dedupe.feedback_adjustments", return_value={}
+            "job_radar.main.dedupe.feedback_adjustments", return_value={}
         ), patch(
-            "main.matcher.evaluate_jobs", return_value=evaluated
+            "job_radar.main.matcher.evaluate_jobs", return_value=evaluated
         ), patch(
-            "main.matcher.select_matches", return_value=evaluated
+            "job_radar.main.matcher.select_matches", return_value=evaluated
         ), patch(
-            "main.dedupe.seen_status",
+            "job_radar.main.dedupe.seen_status",
             return_value=pd.Series([False]),
         ), patch(
-            "main.scrape_state.start_run"
+            "job_radar.main.scrape_state.start_run"
         ) as start_run, patch(
-            "main.dedupe.filter_new"
+            "job_radar.main.dedupe.filter_new"
         ) as filter_new, patch(
-            "main.notifier.send_all"
+            "job_radar.main.notifier.send_all"
         ) as send_all, patch(
-            "main.application_tracker.run_automation"
+            "job_radar.main.application_tracker.run_automation"
         ) as application_automation:
             main.main(["--dry-run"])
 
@@ -213,24 +212,24 @@ class MainTests(unittest.TestCase):
                 matched=True,
             )
 
-        with patch("main.load_config", return_value=config), patch(
-            "main.run_lock.single_instance", return_value=nullcontext()
+        with patch("job_radar.main.load_config", return_value=config), patch(
+            "job_radar.main.run_lock.single_instance", return_value=nullcontext()
         ), patch(
-            "main.resume_profile.load_or_refresh",
+            "job_radar.main.resume_profile.load_or_refresh",
             return_value={"skills": ["python"], "roles": ["backend engineer"]},
         ), patch(
-            "main._selected_searches", return_value=config["searches"]
+            "job_radar.main._selected_searches", return_value=config["searches"]
         ), patch(
-            "main.scraper.run_all", return_value=jobspy_outcome
+            "job_radar.main.scraper.run_all", return_value=jobspy_outcome
         ), patch(
-            "main.source_runner.run_all", return_value=external_outcome
+            "job_radar.main.source_runner.run_all", return_value=external_outcome
         ), patch(
-            "main.dedupe.feedback_adjustments", return_value={}
+            "job_radar.main.dedupe.feedback_adjustments", return_value={}
         ), patch(
-            "main.matcher.evaluate_jobs", side_effect=evaluate
+            "job_radar.main.matcher.evaluate_jobs", side_effect=evaluate
         ), patch(
-            "main.matcher.select_matches", return_value=pd.DataFrame()
+            "job_radar.main.matcher.select_matches", return_value=pd.DataFrame()
         ), patch(
-            "main._print_explanations"
+            "job_radar.main._print_explanations"
         ):
             main.main(["--dry-run"])

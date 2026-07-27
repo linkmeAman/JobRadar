@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-import semantic
+from job_radar import semantic
 
 
 class FakeResponse:
@@ -46,7 +46,7 @@ class SemanticTests(unittest.TestCase):
             "maximum_bonus": 4,
         }
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test"}), patch(
-            "semantic.requests.post", return_value=FakeResponse()
+            "job_radar.semantic.requests.post", return_value=FakeResponse()
         ) as post:
             scored = semantic.apply_semantic_scoring(
                 jobs,

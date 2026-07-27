@@ -10,7 +10,7 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 
-from sources.common import frame
+from .common import frame
 
 
 ASK_STORIES_URL = "https://hacker-news.firebaseio.com/v0/askstories.json"

@@ -8,7 +8,7 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from sources.common import frame
+from .common import frame
 
 
 _JOB_LINK = re.compile(r"^https?://(?:www\.)?cutshort\.io/job/")

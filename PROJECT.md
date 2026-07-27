@@ -21,6 +21,19 @@ resume PDFs
 The process runs to completion every 30 minutes under systemd. A filesystem
 lock prevents scheduled and manual runs from overlapping.
 
+```mermaid
+flowchart LR
+    timer[30-minute timer] --> main[job_radar.main]
+    main --> resume[Resume profile and search generation]
+    main --> sources[JobSpy plus external sources]
+    resume --> match[Matching and optional semantic score]
+    sources --> match
+    match --> db[SQLite dedupe and pending queue]
+    db --> telegram[Telegram alerts]
+    telegram --> apps[Application status and reminders]
+    main --> history[scrape_runs and health state]
+```
+
 ## Project structure
 
 ```text
@@ -126,10 +139,10 @@ are excluded.
 ## Execution modes
 
 ```bash
-python main.py
-python main.py --dry-run
-python main.py --explain
-python main.py --feedback <job_id> <relevant|irrelevant|applied>
+python -m job_radar.main
+python -m job_radar.main --dry-run
+python -m job_radar.main --explain
+python -m job_radar.main --feedback <job_id> <relevant|irrelevant|applied>
 ```
 
 Dry-run and explain mode perform scraping and matching without Telegram calls

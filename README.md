@@ -25,6 +25,66 @@ resume PDFs
 A process lock at `data/job-radar.lock` prevents a manual invocation from
 overlapping a systemd run.
 
+## Repository layout
+
+```text
+Radar/
+├── job_radar/                 Python package
+│   ├── main.py                CLI and orchestration
+│   ├── scraper.py             JobSpy provider isolation
+│   ├── sources/               HN, Cutshort, and Hirist adapters
+│   ├── matcher.py             resume relevance rules
+│   ├── resume_profile.py      PDF extraction and profile cache
+│   ├── search_generator.py    resume-derived search terms
+│   ├── dedupe.py              SQLite identity and delivery state
+│   ├── application_tracker.py Telegram commands and reminders
+│   ├── notifier.py            Telegram Bot API transport
+│   ├── scrape_state.py        cooldowns, rotation, and run history
+│   └── semantic.py             optional borderline scoring
+├── tests/                     offline test suite and fixtures
+├── deploy/                    systemd service and timer
+├── data/                      runtime SQLite and resume cache
+├── config.yaml                searches and runtime settings
+├── requirements.txt           Python dependencies
+├── README.md                  setup and operations guide
+└── PROJECT.md                current technical reference
+```
+
+## End-to-end flow
+
+```mermaid
+flowchart TD
+    A[systemd timer or manual command] --> B[Load config and environment]
+    B --> C[Acquire single-instance lock]
+    C --> D[Validate Telegram target]
+    D --> E[Process /applied, /contacted, and /status commands]
+    E --> F[Refresh resume profile when PDFs change]
+    F --> G[Generate rotating resume-aligned searches]
+    G --> H[Run JobSpy searches independently]
+    F --> I[Run due HN, Cutshort, and Hirist adapters]
+    H --> J[Merge provider results and record cooldowns]
+    I --> J
+    J --> K[Deterministic resume matcher]
+    K --> L{Semantic scoring enabled?}
+    L -- yes --> M[Score borderline listings]
+    L -- no --> N[Keep deterministic scores]
+    M --> O[Select listings above threshold]
+    N --> O
+    O --> P[URL-aware SQLite deduplication]
+    P --> Q[Rank pending notifications]
+    Q --> R[Send Telegram job alerts]
+    R --> S[Mark accepted messages notified]
+    E --> T[Daily stale-application check]
+    T --> U[Send follow-up reminder when due]
+    S --> V[Persist scrape run history]
+    U --> V
+    V --> W[Release lock and exit]
+```
+
+Dry-run follows the same scrape and matching branches but skips Telegram
+validation, command polling, reminders, search-state writes, deduplication
+writes, and run-history writes.
+
 ## Setup
 
 Create a virtual environment and install the pinned project dependencies:
@@ -85,7 +145,7 @@ and `scrape_runs` history as JobSpy providers.
 ## Dry run
 
 ```bash
-python main.py --dry-run
+python -m job_radar.main --dry-run
 ```
 
 `--explain` is an alias. The diagnostic run performs resume refresh, query
@@ -108,7 +168,7 @@ From WSL/Linux, export `.env` and run:
 set -a
 . ./.env
 set +a
-python main.py
+python -m job_radar.main
 ```
 
 A normal run validates Telegram before scraping, records provider outcomes,
@@ -141,8 +201,8 @@ Telegram messages contain a short ID:
 Use that ID to label the result:
 
 ```bash
-python main.py --feedback 1a2b3c4d5e6f relevant
-python main.py --feedback 1a2b3c4d5e6f irrelevant
+python -m job_radar.main --feedback 1a2b3c4d5e6f relevant
+python -m job_radar.main --feedback 1a2b3c4d5e6f irrelevant
 ```
 
 Positive feedback adds small bonuses for repeatedly accepted skills.
@@ -180,7 +240,7 @@ the bot sends one compact reminder for active applications whose
 terminal statuses are not included in later reminders.
 
 The equivalent CLI command is
-`python main.py --feedback 1a2b3c4d5e6f applied`.
+`python -m job_radar.main --feedback 1a2b3c4d5e6f applied`.
 
 ## Deduplication and pending expiry
 
@@ -277,7 +337,7 @@ python -m unittest discover -s tests -v
 Run the live pipeline without delivery or state changes:
 
 ```bash
-python main.py --dry-run
+python -m job_radar.main --dry-run
 ```
 
 ## Systemd installation
@@ -304,7 +364,7 @@ If the project is at `/mnt/d/Radar`, change all three installed service paths:
 ```ini
 WorkingDirectory=/mnt/d/Radar
 EnvironmentFile=/mnt/d/Radar/.env
-ExecStart=/mnt/d/Radar/.venv/bin/python main.py
+ExecStart=/mnt/d/Radar/.venv/bin/python -m job_radar.main
 ```
 
 Reload after editing the installed unit:
@@ -323,7 +383,7 @@ journalctl -u job-radar.service -n 100 --no-pager
 - `skipped=cooldown`: that provider is inside its persisted 429 cooldown.
 - `skipped=interval`: the external source completed its configured interval
   recently; this is expected during most 30-minute runs.
-- `matched=0`: inspect `python main.py --dry-run` before lowering the threshold.
+- `matched=0`: inspect `python -m job_radar.main --dry-run` before lowering the threshold.
 - `pending>queued`: the alert cap is working; remaining jobs stay pending.
 - Telegram 401: token invalid or revoked.
 - Telegram 403: wrong chat ID, bot blocked, or `/start` not sent.

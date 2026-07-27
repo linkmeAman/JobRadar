@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import dedupe
+from job_radar import dedupe
 
 
 class DedupeTests(unittest.TestCase):

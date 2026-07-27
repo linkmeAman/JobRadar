@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-import search_generator
+from job_radar import search_generator
 
 
 class SearchGeneratorTests(unittest.TestCase):

@@ -11,8 +11,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-import application_tracker
-import dedupe
+from job_radar import application_tracker, dedupe
 
 
 class ApplicationTrackerTests(unittest.TestCase):
@@ -127,13 +126,13 @@ class ApplicationTrackerTests(unittest.TestCase):
         ]
         replies: list[str] = []
         with patch(
-            "application_tracker.notifier.get_credentials",
+            "job_radar.application_tracker.notifier.get_credentials",
             return_value=("123:token", "111"),
         ), patch(
-            "application_tracker.notifier.fetch_updates",
+            "job_radar.application_tracker.notifier.fetch_updates",
             return_value=updates,
         ) as fetch, patch(
-            "application_tracker.notifier.send_text",
+            "job_radar.application_tracker.notifier.send_text",
             side_effect=replies.append,
         ):
             processed = application_tracker.process_telegram_commands()
@@ -157,7 +156,7 @@ class ApplicationTrackerTests(unittest.TestCase):
         }
 
         with patch(
-            "application_tracker.notifier.send_text",
+            "job_radar.application_tracker.notifier.send_text",
             side_effect=messages.append,
         ):
             first = application_tracker.maybe_send_stale_reminder(

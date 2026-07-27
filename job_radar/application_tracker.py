@@ -9,8 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import dedupe
-import notifier
+from . import dedupe, notifier
 
 
 DATABASE_PATH = dedupe.DATABASE_PATH
@@ -333,7 +332,6 @@ def maybe_send_stale_reminder(
         )
     if len(stale) > limit:
         lines.append(f"…and {len(stale) - limit} more")
-    lines.append("Use /contacted <id> after a reply.")
     notifier.send_text("\n".join(lines))
     _record_reminder_check(now=now)
     return len(stale)

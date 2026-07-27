@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pandas as pd
 import requests
 
-import notifier
+from job_radar import notifier
 
 
 class FakeResponse:
@@ -61,8 +61,8 @@ class NotifierTests(unittest.TestCase):
         ]
         delivered: list[str] = []
 
-        with patch("notifier.requests.post", side_effect=responses) as post, patch(
-            "notifier.time.sleep"
+        with patch("job_radar.notifier.requests.post", side_effect=responses) as post, patch(
+            "job_radar.notifier.time.sleep"
         ) as sleep:
             sent = notifier.send_all(self.job, on_sent=delivered.append)
 
@@ -73,7 +73,7 @@ class NotifierTests(unittest.TestCase):
 
     def test_forbidden_response_is_not_retried(self) -> None:
         with patch(
-            "notifier.requests.post",
+            "job_radar.notifier.requests.post",
             return_value=FakeResponse(403, {"ok": False}),
         ) as post, self.assertRaisesRegex(RuntimeError, "HTTP 403"):
             notifier.send_all(self.job)
@@ -83,11 +83,10 @@ class NotifierTests(unittest.TestCase):
     def test_job_message_includes_feedback_identifier(self) -> None:
         message = notifier.format_job_message(self.job.iloc[0])
         self.assertIn("🆔 job-1", message)
-        self.assertIn("/applied job-1", message)
 
     def test_health_alert_uses_same_bot_api(self) -> None:
         with patch(
-            "notifier.requests.post",
+            "job_radar.notifier.requests.post",
             return_value=FakeResponse(200, {"ok": True}),
         ) as post:
             notifier.send_health_alert("All providers failed")
@@ -102,7 +101,7 @@ class NotifierTests(unittest.TestCase):
             {"ok": True, "result": [{"update_id": 42}]},
         )
         with patch(
-            "notifier.requests.get", return_value=response
+            "job_radar.notifier.requests.get", return_value=response
         ) as get:
             updates = notifier.fetch_updates(offset=42)
 

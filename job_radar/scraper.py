@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 from jobspy import scrape_jobs
 
-import scrape_state
+from . import scrape_state
 
 
 _CONFIG_ONLY_KEYS = {"name", "always_run"}

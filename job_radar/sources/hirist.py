@@ -9,7 +9,7 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 
-from sources.common import frame, slugify, utc_from_milliseconds
+from .common import frame, slugify, utc_from_milliseconds
 
 
 FEED_URL = "https://gladiator.hirist.tech/job/category/"

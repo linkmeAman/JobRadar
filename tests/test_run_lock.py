@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import run_lock
+from job_radar import run_lock
 
 
 class RunLockTests(unittest.TestCase):

@@ -8,10 +8,10 @@ from typing import Any
 import pandas as pd
 import requests
 
-import scrape_state
-from scraper import ScrapeOutcome
-from sources import cutshort, hacker_news, hirist
-from sources.common import frame
+from .. import scrape_state
+from ..scraper import ScrapeOutcome
+from . import cutshort, hacker_news, hirist
+from .common import frame
 
 
 Adapter = Callable[[dict[str, Any], requests.Session, int], pd.DataFrame]

@@ -7,8 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import matcher
-import resume_profile
+from job_radar import matcher, resume_profile
 
 
 class MatcherTests(unittest.TestCase):
