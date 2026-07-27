@@ -111,6 +111,13 @@ TELEGRAM_CHAT_ID=your_personal_chat_id
 
 Send `/start` to the bot before the first run. `.env` is ignored by Git.
 
+Optional path and UI settings:
+
+- `JOB_RADAR_CONFIG_PATH`: configuration file (default `config.yaml`).
+- `JOB_RADAR_DATABASE_PATH`: SQLite database (default `data/jobs.db`).
+- `JOB_RADAR_LOCK_PATH`: run lock (default `data/job-radar.lock`).
+- `JOB_RADAR_UI_TOKEN`: bearer token for UI API requests when set.
+
 ## Local UI
 
 The UI is a localhost-only, standard-library report page. Use the four tabs to
@@ -127,15 +134,19 @@ navigate between Dashboard, Jobs, Applications, and History:
   after seven days without contact.
 - **History** shows scraper runs and every manual UI trigger, including errors.
 
+Application details can be saved from the job dialog: notes, follow-up date,
+interview date, resume version, and cover-letter version. The dashboard shows
+feedback precision, alert-to-application conversion, and duplicate rate.
+
 Start it from the repository root:
 
 ```bash
 python -m job_radar.web.server
 ```
 
-Open http://127.0.0.1:8765. The UI binds to localhost and has no
-authentication, so do not expose the port publicly. Restart the web service
-after updating the code so the browser loads the new page.
+Open http://127.0.0.1:8765. Set `JOB_RADAR_UI_TOKEN` to protect API requests;
+the browser prompts for it and stores it locally. Non-loopback binding also
+requires `JOB_RADAR_ALLOW_NONLOCAL_UI=1`.
 
 ## Resume automation and search generation
 
@@ -152,6 +163,10 @@ the strongest detected backend skills. Static non-always entries under
 Indeed entries continue to obey JobSpy's constraint: they include
 `country_indeed` and do not combine `hours_old` with both `job_type` and
 `is_remote`.
+
+Set `matching.minimum_salary` and normalized `company_blacklist` or
+`company_allowlist` entries to exclude jobs before ranking. Leave the allowlist
+empty to permit every company.
 
 ## Additional high-signal sources
 
@@ -237,6 +252,8 @@ Telegram alerts also include inline buttons:
 - `Save`: stores positive relevance feedback without marking an application.
 - `Reject`: stores `irrelevant` feedback, which can reduce similar company
   matches later.
+- `Show fewer like this`: stores the same negative signal with explicit intent
+  to reduce similar listings.
 - `Contacted`: refreshes the latest contact timestamp for tracked applications.
 - `Open job`: opens the listing URL.
 
@@ -281,6 +298,9 @@ the bot sends one compact reminder for active applications whose
 `last_contact` is at least seven days old. `/contacted` resets that clock;
 terminal statuses are not included in later reminders.
 
+The UI stores the original job description when an application is created and
+keeps status, contact, and detail changes in `application_events`.
+
 The equivalent CLI command is
 `python -m job_radar.main --feedback 1a2b3c4d5e6f applied`.
 
@@ -304,8 +324,14 @@ SQLite at `data/jobs.db` contains:
 
 - `seen_jobs`: identity, retry payload, delivery time, and expiry time;
 - `job_feedback`: relevant, irrelevant, and applied labels;
-- `applications`: application date, current status, and latest contact;
-- `provider_state`: provider results, 429 streaks, and cooldowns;
+- `feedback_events`: append-only feedback history with score and reason data;
+- `applications`: application date, status, contact, notes, dates, document
+  versions, and the application-time description snapshot;
+- `application_events`: append-only application transition history;
+- `dedupe_events`: duplicate detections used by dashboard metrics;
+- `audit_log`: UI mutation records;
+- `schema_version`: migration version;
+- `provider_state`: provider results, 429 streaks, zero-result streaks, and cooldowns;
 - `runtime_state`: search/source cursors, Telegram update offset, and reminder
   schedule;
 - `scrape_runs`: duration, selected searches, provider status/errors,
@@ -317,6 +343,10 @@ sends one Telegram health alert for that outage streak. It does not alert for a
 single provider failure, and a successful provider resets the streak. A
 separate alert is sent once when an individual provider reaches
 `monitoring.provider_failure_alert_runs`, even if other providers succeed.
+
+Repeated successful zero-result runs also produce a provider degradation alert,
+which catches silent parser breakage. Read-only monitoring endpoints are
+available at `/health` and `/api/metrics`.
 
 Inspect recent history:
 
@@ -426,6 +456,8 @@ JOB_RADAR_RESUME_PATHS=/app/resumes/Aman_Singh.pdf,/app/resumes/Aman_Singh_CV.pd
 JOB_RADAR_INTERVAL_SECONDS=1800
 JOB_RADAR_BACKUP_INTERVAL_SECONDS=86400
 JOB_RADAR_BACKUP_RETENTION_DAYS=14
+JOB_RADAR_UI_TOKEN=choose_a_local_token
+JOB_RADAR_DATABASE_PATH=/app/data/jobs.db
 ```
 
 Do not run the Docker scheduler and the systemd timer at the same time; choose
@@ -492,6 +524,18 @@ older than `backups.retention_days` (14 by default). Test it manually with:
 
 ```bash
 python -m job_radar.backup
+```
+
+Backups are integrity-checked. Restore one atomically with:
+
+```bash
+python -m job_radar.backup --restore data/backups/jobs-YYYYMMDDTHHMMSSZ.db
+```
+
+Check a database without restoring it:
+
+```bash
+python -c "from pathlib import Path; from job_radar.storage import integrity_check; print(integrity_check(Path('data/jobs.db')))"
 ```
 
 Reload after editing the installed unit:

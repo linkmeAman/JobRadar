@@ -27,7 +27,7 @@ from . import (
 from .sources import runner as source_runner
 
 
-CONFIG_PATH = Path("config.yaml")
+CONFIG_PATH = Path(os.environ.get("JOB_RADAR_CONFIG_PATH", "config.yaml"))
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
@@ -65,6 +65,9 @@ def _matching_options(config: dict[str, Any]) -> dict[str, Any]:
         "allowed_countries": list(
             matching.get("allowed_countries", ["India"])
         ),
+        "company_blacklist": list(matching.get("company_blacklist", [])),
+        "company_allowlist": list(matching.get("company_allowlist", [])),
+        "minimum_salary": float(matching.get("minimum_salary", 0)),
     }
 
 

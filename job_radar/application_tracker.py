@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from . import dedupe, notifier
+from . import dedupe, notifier, storage
 
 
 DATABASE_PATH = dedupe.DATABASE_PATH
@@ -18,24 +18,7 @@ TERMINAL_STATUSES = {"offer", "rejected", "withdrawn"}
 VALID_STATUSES = ACTIVE_STATUSES | TERMINAL_STATUSES
 _UPDATE_OFFSET_KEY = "telegram_application_update_offset"
 _REMINDER_CHECK_KEY = "application_last_reminder_check"
-
-_APPLICATIONS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS applications (
-    job_id TEXT PRIMARY KEY,
-    applied_at TEXT NOT NULL,
-    status TEXT NOT NULL,
-    last_contact TEXT NOT NULL,
-    FOREIGN KEY(job_id) REFERENCES seen_jobs(job_id)
-)
-"""
-
-_RUNTIME_SCHEMA = """
-CREATE TABLE IF NOT EXISTS runtime_state (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-)
-"""
-
+_UNSET = object()
 
 def _database_path():
     """Use the dedupe database path as the single source of truth."""
@@ -55,11 +38,21 @@ def _now() -> datetime:
 
 def _connect() -> sqlite3.Connection:
     database_path = _database_path()
-    database_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(database_path)
-    connection.execute(_APPLICATIONS_SCHEMA)
-    connection.execute(_RUNTIME_SCHEMA)
-    return connection
+    return storage.connect(database_path)
+
+
+def _job_snapshot(connection: sqlite3.Connection, job_id: str) -> dict[str, Any]:
+    row = connection.execute(
+        "SELECT notification_payload FROM seen_jobs WHERE job_id = ?",
+        (job_id,),
+    ).fetchone()
+    if not row or not row[0]:
+        return {}
+    try:
+        value = json.loads(row[0])
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def mark_applied(
@@ -70,18 +63,35 @@ def mark_applied(
     timestamp = (now or _now()).isoformat()
     connection = _connect()
     try:
+        snapshot = _job_snapshot(connection, job_id)
         with connection:
             cursor = connection.execute(
                 """
                 INSERT OR IGNORE INTO applications
-                    (job_id, applied_at, status, last_contact)
-                VALUES (?, ?, 'applied', ?)
+                    (job_id, applied_at, status, last_contact,
+                     description_snapshot, updated_at)
+                VALUES (?, ?, 'applied', ?, ?, ?)
                 """,
-                (job_id, timestamp, timestamp),
+                (
+                    job_id,
+                    timestamp,
+                    timestamp,
+                    snapshot.get("description"),
+                    timestamp,
+                ),
             )
+            if cursor.rowcount == 1:
+                connection.execute(
+                    """
+                    INSERT INTO application_events
+                        (job_id, event_type, new_status, occurred_at)
+                    VALUES (?, 'applied', 'applied', ?)
+                    """,
+                    (job_id, timestamp),
+                )
     finally:
         connection.close()
-    dedupe.record_feedback(job_id, "applied")
+    dedupe.record_feedback(job_id, "applied", source="application")
     return ApplicationChange(
         job_id=job_id,
         created=cursor.rowcount == 1,
@@ -112,6 +122,14 @@ def mark_contacted(
                 "SELECT status FROM applications WHERE job_id = ?",
                 (job_id,),
             ).fetchone()[0]
+            connection.execute(
+                """
+                INSERT INTO application_events
+                    (job_id, event_type, occurred_at)
+                VALUES (?, 'contacted', ?)
+                """,
+                (job_id, (now or _now()).isoformat()),
+            )
     finally:
         connection.close()
     return ApplicationChange(job_id=job_id, status=str(status))
@@ -132,6 +150,10 @@ def set_status(
     connection = _connect()
     try:
         with connection:
+            old = connection.execute(
+                "SELECT status FROM applications WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
             cursor = connection.execute(
                 """
                 UPDATE applications
@@ -144,9 +166,69 @@ def set_status(
                 raise ValueError(
                     f"job {job_id[:12]} is not tracked; use /applied first"
                 )
+            timestamp = (now or _now()).isoformat()
+            connection.execute(
+                """
+                INSERT INTO application_events
+                    (job_id, event_type, old_status, new_status, occurred_at)
+                VALUES (?, 'status_changed', ?, ?, ?)
+                """,
+                (job_id, old[0] if old else None, normalized, timestamp),
+            )
     finally:
         connection.close()
     return ApplicationChange(job_id=job_id, status=normalized)
+
+
+def update_details(
+    job_id_or_prefix: str,
+    *,
+    notes: str | None | object = _UNSET,
+    next_follow_up_at: str | None | object = _UNSET,
+    interview_at: str | None | object = _UNSET,
+    resume_version: str | None | object = _UNSET,
+    cover_letter_version: str | None | object = _UNSET,
+) -> ApplicationChange:
+    """Update optional application details without changing its status."""
+    job_id = dedupe.resolve_job_id(job_id_or_prefix)
+    fields = {
+        "notes": notes,
+        "next_follow_up_at": next_follow_up_at,
+        "interview_at": interview_at,
+        "resume_version": resume_version,
+        "cover_letter_version": cover_letter_version,
+    }
+    updates = [(name, value) for name, value in fields.items() if value is not _UNSET]
+    if not updates:
+        raise ValueError("provide at least one application detail")
+    connection = _connect()
+    try:
+        with connection:
+            columns = ", ".join(f"{name} = ?" for name, _ in updates)
+            values = [value for _, value in updates]
+            values.extend([(datetime.now(timezone.utc)).isoformat(), job_id])
+            cursor = connection.execute(
+                f"UPDATE applications SET {columns}, updated_at = ? WHERE job_id = ?",
+                values,
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    f"job {job_id[:12]} is not tracked; use /applied first"
+                )
+            connection.execute(
+                """
+                INSERT INTO application_events
+                    (job_id, event_type, note, occurred_at)
+                VALUES (?, 'details_updated', ?, ?)
+                """,
+                (job_id, notes, datetime.now(timezone.utc).isoformat()),
+            )
+            status = connection.execute(
+                "SELECT status FROM applications WHERE job_id = ?", (job_id,)
+            ).fetchone()[0]
+    finally:
+        connection.close()
+    return ApplicationChange(job_id=job_id, status=str(status))
 
 
 def stale_applications(

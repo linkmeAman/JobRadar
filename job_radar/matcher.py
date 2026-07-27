@@ -7,6 +7,8 @@ from typing import Any
 
 import pandas as pd
 
+from .dedupe import normalize_company
+
 
 _ROLE_WEIGHTS = (
     ("backend", 8),
@@ -79,6 +81,9 @@ def _exclusion_reason(
     excluded_title_terms: list[str],
     maximum_required_years: int,
     country_eligible: bool,
+    company_blacklist: list[str],
+    company_allowlist: list[str],
+    minimum_salary: float,
 ) -> str | None:
     title = _text(row, ("title",))
     for term in excluded_title_terms:
@@ -92,6 +97,19 @@ def _exclusion_reason(
 
     if not country_eligible:
         return f"country not allowed: {row.get('country')}"
+
+    company = normalize_company(row.get("company"))
+    blacklist = {normalize_company(value) for value in company_blacklist}
+    allowlist = {normalize_company(value) for value in company_allowlist}
+    if company and company in blacklist:
+        return "company blacklisted"
+    if allowlist and company not in allowlist:
+        return "company not allowlisted"
+
+    if minimum_salary > 0:
+        maximum_salary = row.get("max_amount")
+        if pd.notna(maximum_salary) and float(maximum_salary) < minimum_salary:
+            return f"salary below minimum: {maximum_salary}"
     return None
 
 
@@ -141,9 +159,9 @@ def _score(
         score += bonus
         reasons.append(f"feedback +{bonus}")
 
-    company = _text(row, ("company",)).strip()
+    company = normalize_company(row.get("company"))
     penalized_companies = {
-        str(value).strip().lower()
+        normalize_company(value)
         for value in feedback.get("penalized_companies", [])
     }
     if company and company in penalized_companies:
@@ -161,6 +179,9 @@ def evaluate_jobs(
     maximum_required_years: int = 5,
     allowed_countries: list[str] | None = None,
     feedback: dict[str, Any] | None = None,
+    company_blacklist: list[str] | None = None,
+    company_allowlist: list[str] | None = None,
+    minimum_salary: float = 0,
 ) -> pd.DataFrame:
     """Explain every scraped row and flag jobs that pass deterministic matching."""
     if df.empty:
@@ -180,6 +201,8 @@ def evaluate_jobs(
     excluded_title_terms = excluded_title_terms or []
     seniority_penalty_terms = seniority_penalty_terms or []
     allowed_countries = allowed_countries or []
+    company_blacklist = company_blacklist or []
+    company_allowlist = company_allowlist or []
 
     ranked = df.copy()
     requirements = [
@@ -199,6 +222,9 @@ def evaluate_jobs(
             excluded_title_terms,
             maximum_required_years,
             bool(ranked.iloc[position]["country_eligible"]),
+            company_blacklist,
+            company_allowlist,
+            minimum_salary,
         )
         for position, (_, row) in enumerate(ranked.iterrows())
     ]
@@ -237,6 +263,9 @@ def filter_and_rank(
     maximum_required_years: int = 5,
     allowed_countries: list[str] | None = None,
     feedback: dict[str, Any] | None = None,
+    company_blacklist: list[str] | None = None,
+    company_allowlist: list[str] | None = None,
+    minimum_salary: float = 0,
 ) -> pd.DataFrame:
     """Keep resume-matched jobs, ordered from strongest to weakest fit."""
     evaluated = evaluate_jobs(
@@ -248,5 +277,8 @@ def filter_and_rank(
         maximum_required_years,
         allowed_countries,
         feedback,
+        company_blacklist,
+        company_allowlist,
+        minimum_salary,
     )
     return select_matches(evaluated, minimum_score)

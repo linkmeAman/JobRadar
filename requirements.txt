@@ -1,5 +1,5 @@
-python-jobspy
-PyYAML
-requests
-pypdf
-beautifulsoup4
+python-jobspy==1.1.82
+PyYAML==6.0.3
+requests==2.34.2
+pypdf==6.14.2
+beautifulsoup4==4.15.0

@@ -47,8 +47,13 @@ def _unlock(file_handle: TextIO) -> None:
 
 
 @contextmanager
-def single_instance(path: Path = Path("data/job-radar.lock")) -> Iterator[None]:
+def single_instance(
+    path: Path | None = None,
+) -> Iterator[None]:
     """Own an advisory lock until the current run exits."""
+    path = path or Path(
+        os.environ.get("JOB_RADAR_LOCK_PATH", "data/job-radar.lock")
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+", encoding="utf-8") as file_handle:
         file_handle.seek(0, os.SEEK_END)

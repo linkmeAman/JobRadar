@@ -173,6 +173,9 @@ def job_reply_markup(row: pd.Series) -> dict[str, Any] | None:
     job_url = _value(row, "job_url")
     if _is_present(job_url):
         keyboard[-1].append({"text": "Open job", "url": str(job_url)})
+    keyboard.append(
+        [{"text": "Show fewer like this", "callback_data": f"jr:irrelevant:{prefix}"}]
+    )
     return {"inline_keyboard": keyboard}
 
 

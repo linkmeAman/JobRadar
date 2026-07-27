@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 
 from . import dedupe
+from . import storage
 
 
 def backup_database(
@@ -41,6 +42,9 @@ def backup_database(
         target_connection.close()
         source_connection.close()
     temporary.replace(target)
+    if storage.integrity_check(target) != "ok":
+        target.unlink(missing_ok=True)
+        raise sqlite3.DatabaseError(f"backup failed integrity check: {target}")
 
     cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=retention_days)
     for previous in destination.glob("jobs-*.db"):
@@ -54,12 +58,41 @@ def backup_database(
     return target
 
 
+def restore_database(source: Path, destination: Path | None = None) -> Path:
+    """Restore a verified backup atomically into the active database path."""
+    if not source.is_file():
+        raise FileNotFoundError(f"backup not found: {source}")
+    if storage.integrity_check(source) != "ok":
+        raise sqlite3.DatabaseError(f"backup failed integrity check: {source}")
+    target = destination or dedupe.DATABASE_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.restore.tmp")
+    source_connection = sqlite3.connect(source)
+    target_connection = sqlite3.connect(temporary)
+    try:
+        source_connection.backup(target_connection)
+        target_connection.commit()
+    finally:
+        target_connection.close()
+        source_connection.close()
+    temporary.replace(target)
+    if storage.integrity_check(target) != "ok":
+        raise sqlite3.DatabaseError(f"restored database failed integrity check: {target}")
+    return target
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Back up Job Radar SQLite state")
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--retention-days", type=int)
+    parser.add_argument("--restore", type=Path)
+    parser.add_argument("--database", type=Path)
     args = parser.parse_args()
+    if args.restore:
+        target = restore_database(args.restore, args.database)
+        print(f"database_restored={target}")
+        return
     settings: dict[str, object] = {}
     if args.config.exists():
         with args.config.open(encoding="utf-8") as config_file:

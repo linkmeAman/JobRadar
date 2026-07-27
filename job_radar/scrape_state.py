@@ -4,93 +4,27 @@ from __future__ import annotations
 
 import sqlite3
 import json
+import os
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from . import storage
 
-DATABASE_PATH = Path("data") / "jobs.db"
 
-_PROVIDER_SCHEMA = """
-CREATE TABLE IF NOT EXISTS provider_state (
-    provider TEXT PRIMARY KEY,
-    blocked_until TEXT,
-    consecutive_429 INTEGER NOT NULL DEFAULT 0,
-    consecutive_failures INTEGER NOT NULL DEFAULT 0,
-    failure_alert_sent INTEGER NOT NULL DEFAULT 0,
-    last_status TEXT,
-    last_result_count INTEGER,
-    updated_at TEXT NOT NULL
-)
-"""
-
-_RUNTIME_SCHEMA = """
-CREATE TABLE IF NOT EXISTS runtime_state (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-)
-"""
-
-_RUNS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS scrape_runs (
-    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    duration_seconds REAL,
-    mode TEXT NOT NULL,
-    selected_searches TEXT NOT NULL,
-    provider_status TEXT,
-    scraped_count INTEGER NOT NULL DEFAULT 0,
-    matched_count INTEGER NOT NULL DEFAULT 0,
-    new_count INTEGER NOT NULL DEFAULT 0,
-    pending_count INTEGER NOT NULL DEFAULT 0,
-    queued_count INTEGER NOT NULL DEFAULT 0,
-    deferred_count INTEGER NOT NULL DEFAULT 0,
-    expired_count INTEGER NOT NULL DEFAULT 0,
-    sent_count INTEGER NOT NULL DEFAULT 0,
-    all_providers_failed INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'running',
-    error TEXT,
-    health_alert_sent INTEGER NOT NULL DEFAULT 0
-)
-"""
-
+DATABASE_PATH = Path(os.environ.get("JOB_RADAR_DATABASE_PATH", "data/jobs.db"))
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _connect() -> sqlite3.Connection:
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DATABASE_PATH)
-    connection.execute(_PROVIDER_SCHEMA)
-    columns = {
-        row[1]
-        for row in connection.execute("PRAGMA table_info(provider_state)")
-    }
-    migrations = {
-        "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
-        "failure_alert_sent": "INTEGER NOT NULL DEFAULT 0",
-    }
-    migrated = False
-    for name, definition in migrations.items():
-        if name not in columns:
-            connection.execute(
-                f"ALTER TABLE provider_state ADD COLUMN {name} {definition}"
-            )
-            migrated = True
-    if migrated:
-        connection.commit()
-    connection.execute(_RUNTIME_SCHEMA)
-    connection.execute(_RUNS_SCHEMA)
-    return connection
+def _connect(*, read_only: bool = False) -> sqlite3.Connection:
+    return storage.connect(DATABASE_PATH, read_only=read_only)
 
 
 def _connect_read_only() -> sqlite3.Connection:
-    return sqlite3.connect(
-        f"{DATABASE_PATH.resolve().as_uri()}?mode=ro", uri=True
-    )
+    return storage.connect(DATABASE_PATH, read_only=True)
 
 
 def blocked_until(
@@ -159,6 +93,7 @@ def record_blocked(
                     blocked_until = excluded.blocked_until,
                     consecutive_429 = excluded.consecutive_429,
                     consecutive_failures = excluded.consecutive_failures,
+                    consecutive_empty_results = 0,
                     last_status = excluded.last_status,
                     last_result_count = NULL,
                     updated_at = excluded.updated_at
@@ -183,24 +118,42 @@ def record_success(
     current = now or _now()
     connection = _connect()
     try:
+        previous = connection.execute(
+            "SELECT consecutive_empty_results FROM provider_state WHERE provider = ?",
+            (provider,),
+        ).fetchone()
+        empty_results = (
+            (int(previous[0]) if previous else 0) + 1
+            if result_count == 0
+            else 0
+        )
+        status = "success_empty" if result_count == 0 else "success"
         with connection:
             connection.execute(
                 """
                 INSERT INTO provider_state
                     (provider, blocked_until, consecutive_429,
-                     consecutive_failures, failure_alert_sent, last_status,
+                     consecutive_failures, failure_alert_sent,
+                     consecutive_empty_results, last_status,
                      last_result_count, updated_at)
-                VALUES (?, NULL, 0, 0, 0, 'success', ?, ?)
+                VALUES (?, NULL, 0, 0, 0, ?, ?, ?, ?)
                 ON CONFLICT(provider) DO UPDATE SET
                     blocked_until = NULL,
                     consecutive_429 = 0,
                     consecutive_failures = 0,
                     failure_alert_sent = 0,
-                    last_status = 'success',
+                    consecutive_empty_results = excluded.consecutive_empty_results,
+                    last_status = excluded.last_status,
                     last_result_count = excluded.last_result_count,
                     updated_at = excluded.updated_at
                 """,
-                (provider, result_count, current.isoformat()),
+                (
+                    provider,
+                    empty_results,
+                    status,
+                    result_count,
+                    current.isoformat(),
+                ),
             )
     finally:
         connection.close()
@@ -226,6 +179,7 @@ def record_failure(provider: str, status: str, now: datetime | None = None) -> N
                 VALUES (?, NULL, 0, ?, ?, NULL, ?)
                 ON CONFLICT(provider) DO UPDATE SET
                     consecutive_failures = excluded.consecutive_failures,
+                    consecutive_empty_results = 0,
                     last_status = excluded.last_status,
                     last_result_count = NULL,
                     updated_at = excluded.updated_at
@@ -256,6 +210,7 @@ def record_cooldown(provider: str, now: datetime | None = None) -> None:
                 VALUES (?, NULL, 0, ?, 'cooldown', NULL, ?)
                 ON CONFLICT(provider) DO UPDATE SET
                     consecutive_failures = excluded.consecutive_failures,
+                    consecutive_empty_results = 0,
                     last_status = 'cooldown',
                     last_result_count = NULL,
                     updated_at = excluded.updated_at
@@ -274,13 +229,21 @@ def degraded_providers(
     if threshold <= 0 or not provider_status:
         return []
 
-    connection = _connect()
+    if not DATABASE_PATH.exists():
+        return []
     try:
-        run_rows = connection.execute(
-            """SELECT provider_status FROM scrape_runs
-               WHERE mode = 'normal' AND status IN ('completed', 'failed')
-               ORDER BY run_id DESC"""
-        ).fetchall()
+        connection = _connect(read_only=True)
+    except sqlite3.OperationalError:
+        return []
+    try:
+        try:
+            run_rows = connection.execute(
+                """SELECT provider_status FROM scrape_runs
+                   WHERE mode = 'normal' AND status IN ('completed', 'failed')
+                   ORDER BY run_id DESC"""
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
         degraded: list[dict[str, Any]] = []
         for provider, status in provider_status.items():
             if status.get("status") == "scheduled_skip":
@@ -291,6 +254,7 @@ def degraded_providers(
                 "blocked_429",
                 "cooldown",
                 "skipped_blocked",
+                "success",
             }:
                 continue
             failures = 0
@@ -310,14 +274,38 @@ def degraded_providers(
                 }:
                     break
                 failures += 1
-            row = connection.execute(
-                """SELECT consecutive_failures, failure_alert_sent
-                   FROM provider_state WHERE provider = ?""",
-                (provider,),
-            ).fetchone()
+            try:
+                row = connection.execute(
+                    """SELECT consecutive_failures, failure_alert_sent,
+                              consecutive_empty_results
+                       FROM provider_state WHERE provider = ?""",
+                    (provider,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                legacy_row = connection.execute(
+                    """SELECT consecutive_failures, failure_alert_sent
+                       FROM provider_state WHERE provider = ?""",
+                    (provider,),
+                ).fetchone()
+                row = (*legacy_row, 0) if legacy_row else None
             if not row:
                 continue
             alert_sent = bool(row[1])
+            empty_results = int(row[2] or 0)
+            if (
+                current_status == "success"
+                and empty_results >= threshold
+                and not alert_sent
+            ):
+                degraded.append(
+                    {
+                        "provider": provider,
+                        "failures": empty_results,
+                        "status": "success_empty",
+                        "error": "successful runs returned zero listings",
+                    }
+                )
+                continue
             if failures >= threshold and not alert_sent:
                 degraded.append(
                     {

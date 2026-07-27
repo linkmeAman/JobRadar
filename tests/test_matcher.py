@@ -176,3 +176,31 @@ class MatcherTests(unittest.TestCase):
             "country not allowed",
             evaluated.iloc[0]["exclusion_reason"],
         )
+
+    def test_company_and_salary_preferences_exclude_jobs(self) -> None:
+        jobs = pd.DataFrame(
+            [
+                {
+                    "title": "Backend Engineer",
+                    "company": "Blocked Technologies Ltd",
+                    "description": "Python and FastAPI",
+                    "max_amount": 90000,
+                },
+                {
+                    "title": "Backend Engineer",
+                    "company": "Allowed Labs",
+                    "description": "Python and FastAPI",
+                    "max_amount": 120000,
+                },
+            ]
+        )
+        evaluated = matcher.evaluate_jobs(
+            jobs,
+            {"skills": ["python", "fastapi"]},
+            minimum_score=1,
+            company_blacklist=["Blocked Technologies"],
+            company_allowlist=["Allowed Labs"],
+            minimum_salary=100000,
+        )
+        self.assertEqual(evaluated.iloc[0]["exclusion_reason"], "company blacklisted")
+        self.assertTrue(bool(evaluated.iloc[1]["matched"]))

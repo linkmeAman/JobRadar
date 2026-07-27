@@ -8,7 +8,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from job_radar.backup import backup_database
+from job_radar.backup import backup_database, restore_database
 
 
 class BackupTests(unittest.TestCase):
@@ -46,3 +46,26 @@ class BackupTests(unittest.TestCase):
                 "Backend Engineer",
             )
             copy.close()
+
+    def test_restore_database_verifies_and_replaces_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.db"
+            backup = root / "backup.db"
+            target = root / "target.db"
+            for path, title in ((source, "Original"), (target, "Old")):
+                connection = sqlite3.connect(path)
+                connection.execute("CREATE TABLE jobs (title TEXT)")
+                connection.execute("INSERT INTO jobs VALUES (?)", (title,))
+                connection.commit()
+                connection.close()
+            backup_database(root, source=source, now=datetime(2026, 7, 27, tzinfo=timezone.utc))
+            created = next(root.glob("jobs-*.db"))
+            created.replace(backup)
+
+            restored = restore_database(backup, target)
+
+            self.assertEqual(restored, target)
+            connection = sqlite3.connect(target)
+            self.assertEqual(connection.execute("SELECT title FROM jobs").fetchone()[0], "Original")
+            connection.close()

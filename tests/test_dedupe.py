@@ -257,3 +257,24 @@ class DedupeTests(unittest.TestCase):
         self.assertIn("python", adjustments["preferred_skills"])
         self.assertIn("fastapi", adjustments["preferred_skills"])
         self.assertIn("spamco", adjustments["penalized_companies"])
+
+    def test_metrics_track_feedback_and_duplicate_events(self) -> None:
+        job = pd.DataFrame(
+            [
+                {
+                    "title": "Backend Engineer",
+                    "company": "Acme Technologies Pvt Ltd",
+                    "site": "google",
+                    "job_url": "https://example.test/metrics",
+                    "match_score": 8,
+                    "match_reasons": "backend, python",
+                }
+            ]
+        )
+        dedupe.filter_new(job)
+        dedupe.filter_new(job)
+        dedupe.record_feedback(dedupe.pending_notifications().iloc[0]["job_id"], "relevant")
+
+        metrics = dedupe.metrics()
+        self.assertEqual(metrics["feedback_events"], 1)
+        self.assertGreater(metrics["duplicate_rate"], 0)

@@ -34,6 +34,9 @@ matching:
   max_alerts_per_run: 10
   pending_expiry_days: 7
   maximum_required_years: 5
+  minimum_salary: 0
+  company_blacklist: []
+  company_allowlist: []
   allowed_countries: [India]
   seniority_penalty_terms: [senior, lead]
   excluded_title_terms:

@@ -111,8 +111,14 @@ after the configured retention period.
 
 - `seen_jobs`: identity, notification payload, delivery, and expiry;
 - `job_feedback`: relevant, irrelevant, and applied labels;
-- `applications`: application date, status, and last contact;
-- `provider_state`: result state and rate-limit cooldowns;
+- `applications`: application date, status, contact, notes, follow-up/interview
+  dates, document versions, and the application-time description snapshot;
+- `feedback_events`: append-only relevance history;
+- `application_events`: append-only application transition history;
+- `dedupe_events`: duplicate detections used by metrics;
+- `audit_log`: UI mutation records;
+- `schema_version`: migration version;
+- `provider_state`: result state, rate-limit cooldowns, and zero-result streaks;
 - `runtime_state`: search/source cursors, Telegram offset, and reminders;
 - `scrape_runs`: timing, provider outcomes, counts, errors, and health alerts.
 
@@ -133,8 +139,8 @@ Each job message includes a 12-character ID. Supported commands are:
 /status <id> <applied|screening|interview|offer|rejected|withdrawn>
 ```
 
-Job alerts also expose inline buttons for `Apply`, `Save`, `Reject`,
-`Contacted`, and `Open job`. Button presses use the same SQLite-backed
+Job alerts also expose inline buttons for `Apply`, `Save`, `Reject`, `Show fewer
+like this`, `Contacted`, and `Open job`. Button presses use the same SQLite-backed
 feedback and application paths as the commands above.
 
 Commands are accepted only from `TELEGRAM_CHAT_ID`. The persisted Bot API
@@ -150,6 +156,7 @@ are excluded.
 - A Telegram health alert is sent once per sustained outage streak.
 - A separate Telegram alert is sent once per provider failure streak, even
   while other providers continue returning jobs.
+- Repeated successful zero-result runs are reported as provider degradation.
 - Application command and reminder errors do not stop scraping.
 - Telegram delivery is marked complete only after API acceptance.
 
@@ -166,15 +173,13 @@ python -m job_radar.web.server
 Dry-run and explain mode perform scraping and matching without Telegram calls
 or SQLite state changes.
 
-The local UI binds to 127.0.0.1:8765. Its Dashboard, Jobs, Applications, and
-History tabs read the existing SQLite tables. Jobs can be searched, filtered,
-sorted, paginated, opened for full details, activated/deactivated, and moved
-through application statuses. Application changes update the same
-`applications` table used by Telegram commands, while contact timestamps power
-the existing follow-up reminders. The Run scraper button queues a background
-run with mode `manual_ui`, and every trigger is recorded in
-`web_trigger_history`. It has no public authentication layer and must remain
-localhost-only.
+The local UI binds to 127.0.0.1:8765 by default. Its Dashboard, Jobs,
+Applications, and History tabs read the existing SQLite tables. Jobs can be
+searched, filtered, sorted, paginated, opened for full details,
+activated/deactivated, and moved through application statuses. Optional API
+authentication uses `JOB_RADAR_UI_TOKEN`; cross-origin mutations are rejected,
+trigger requests are rate limited, and every mutation is recorded in
+`audit_log`. `/health` and `/api/metrics` support local monitoring.
 
 The nightly backup unit writes timestamped SQLite copies to `data/backups` and
 retains the configured number of days. Monitoring tracks each provider's

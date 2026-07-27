@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sqlite3
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -14,66 +16,49 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .. import application_tracker, dedupe, main
+from .. import application_tracker, dedupe, main, storage
 
 
 STATIC_DIR = Path(__file__).with_name("static")
-_TRIGGER_SCHEMA = """
-CREATE TABLE IF NOT EXISTS web_trigger_history (
-    trigger_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    requested_at TEXT NOT NULL,
-    started_at TEXT,
-    completed_at TEXT,
-    status TEXT NOT NULL,
-    run_id INTEGER,
-    error TEXT
-)
-"""
-_APPLICATIONS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS applications (
-    job_id TEXT PRIMARY KEY,
-    applied_at TEXT NOT NULL,
-    status TEXT NOT NULL,
-    last_contact TEXT NOT NULL
-)
-"""
-_RUNS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS scrape_runs (
-    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    duration_seconds REAL,
-    mode TEXT NOT NULL,
-    selected_searches TEXT NOT NULL,
-    provider_status TEXT,
-    scraped_count INTEGER NOT NULL DEFAULT 0,
-    matched_count INTEGER NOT NULL DEFAULT 0,
-    new_count INTEGER NOT NULL DEFAULT 0,
-    pending_count INTEGER NOT NULL DEFAULT 0,
-    queued_count INTEGER NOT NULL DEFAULT 0,
-    deferred_count INTEGER NOT NULL DEFAULT 0,
-    expired_count INTEGER NOT NULL DEFAULT 0,
-    sent_count INTEGER NOT NULL DEFAULT 0,
-    all_providers_failed INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'running',
-    error TEXT,
-    health_alert_sent INTEGER NOT NULL DEFAULT 0
-)
-"""
-
-
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _connection() -> sqlite3.Connection:
-    connection = sqlite3.connect(dedupe.DATABASE_PATH)
-    dedupe._initialize_schema(connection)
-    connection.execute(_APPLICATIONS_SCHEMA)
-    connection.execute(_RUNS_SCHEMA)
-    connection.execute(_TRIGGER_SCHEMA)
-    connection.commit()
-    return connection
+    return storage.connect(dedupe.DATABASE_PATH)
+
+
+def _audit(action: str, job_id: str | None, details: dict[str, Any]) -> None:
+    connection = _connection()
+    try:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO audit_log(action, job_id, actor, details, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    action,
+                    job_id,
+                    "web",
+                    json.dumps(details, default=str, sort_keys=True),
+                    _now(),
+                ),
+            )
+    finally:
+        connection.close()
+
+
+def _health() -> dict[str, Any]:
+    try:
+        connection = _connection()
+        try:
+            connection.execute("SELECT 1").fetchone()
+        finally:
+            connection.close()
+        return {"ok": True, "database": "ok", "time": _now()}
+    except sqlite3.Error as exc:
+        return {"ok": False, "database": str(exc), "time": _now()}
 
 
 def _rows_as_dicts(cursor: sqlite3.Cursor) -> list[dict[str, Any]]:
@@ -134,7 +119,9 @@ def jobs(status: str | None = None, limit: int = 10000) -> list[dict[str, Any]]:
             SELECT s.job_id, s.title, s.company, s.site, s.first_seen_at,
                    s.notification_payload, s.notified_at, s.expired_at,
                    s.is_active, a.applied_at, a.status AS application_status,
-                   a.last_contact, f.label AS feedback_label
+                   a.last_contact, f.label AS feedback_label, a.notes,
+                   a.next_follow_up_at, a.interview_at, a.resume_version,
+                   a.cover_letter_version, a.description_snapshot
             FROM seen_jobs s
             LEFT JOIN applications a ON a.job_id = s.job_id
             LEFT JOIN job_feedback f ON f.job_id = s.job_id
@@ -173,6 +160,12 @@ def jobs(status: str | None = None, limit: int = 10000) -> list[dict[str, Any]]:
             "applied_at": row[9],
             "last_contact": row[11],
             "feedback_label": row[12],
+            "notes": row[13],
+            "next_follow_up_at": row[14],
+            "interview_at": row[15],
+            "resume_version": row[16],
+            "cover_letter_version": row[17],
+            "description_snapshot": row[18],
             "job_url": payload.get("job_url"),
             "city": payload.get("city"),
             "state": payload.get("state"),
@@ -302,6 +295,7 @@ class JobRadarServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int]):
         super().__init__(address, RequestHandler)
         self.trigger_executor = ThreadPoolExecutor(max_workers=1)
+        self.last_trigger_at = 0.0
 
     def server_close(self) -> None:
         self.trigger_executor.shutdown(wait=False, cancel_futures=True)
@@ -325,6 +319,28 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _error(self, message: str, status: int = HTTPStatus.BAD_REQUEST) -> None:
         self._json({"error": message}, status)
 
+    def _authorized(self) -> bool:
+        configured = os.environ.get("JOB_RADAR_UI_TOKEN", "").strip()
+        if not configured:
+            return True
+        supplied = self.headers.get("Authorization", "")
+        return supplied == f"Bearer {configured}"
+
+    def _same_origin(self) -> bool:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        return urlsplit(origin).netloc == self.headers.get("Host", "")
+
+    def _guard(self, *, mutating: bool = False) -> bool:
+        if not self._authorized():
+            self._error("authentication required", HTTPStatus.UNAUTHORIZED)
+            return False
+        if mutating and not self._same_origin():
+            self._error("cross-origin request rejected", HTTPStatus.FORBIDDEN)
+            return False
+        return True
+
     def _body(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", 0))
         if length > 10000:
@@ -342,8 +358,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         try:
             if parsed.path == "/api/summary":
+                if not self._guard():
+                    return
                 self._json(summary())
             elif parsed.path == "/api/jobs":
+                if not self._guard():
+                    return
                 query = parse_qs(parsed.query)
                 self._json(
                     jobs(
@@ -352,9 +372,19 @@ class RequestHandler(BaseHTTPRequestHandler):
                     )
                 )
             elif parsed.path == "/api/runs":
+                if not self._guard():
+                    return
                 self._json(runs())
             elif parsed.path == "/api/triggers":
+                if not self._guard():
+                    return
                 self._json(trigger_history())
+            elif parsed.path == "/api/metrics":
+                if not self._guard():
+                    return
+                self._json(dedupe.metrics())
+            elif parsed.path == "/health":
+                self._json(_health(), HTTPStatus.OK)
             else:
                 self._error("not found", HTTPStatus.NOT_FOUND)
         except (ValueError, sqlite3.Error) as exc:
@@ -364,8 +394,14 @@ class RequestHandler(BaseHTTPRequestHandler):
         if self.path != "/api/triggers":
             self._error("not found", HTTPStatus.NOT_FOUND)
             return
+        if not self._guard(mutating=True):
+            return
+        if time.monotonic() - self.server.last_trigger_at < 30:
+            self._error("trigger rate limited", HTTPStatus.TOO_MANY_REQUESTS)
+            return
         try:
             trigger_id = queue_trigger(self.server.trigger_executor)
+            self.server.last_trigger_at = time.monotonic()
             self._json(
                 {"trigger_id": trigger_id, "status": "queued"},
                 HTTPStatus.ACCEPTED,
@@ -377,6 +413,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         prefix = "/api/jobs/"
         if not self.path.startswith(prefix):
             self._error("not found", HTTPStatus.NOT_FOUND)
+            return
+        if not self._guard(mutating=True):
             return
         job_id = unquote(self.path[len(prefix) :]).strip()
         try:
@@ -399,8 +437,20 @@ class RequestHandler(BaseHTTPRequestHandler):
             if body.get("contacted") is True:
                 application_tracker.mark_contacted(job_id)
                 response["contacted"] = True
+            detail_keys = {
+                "notes",
+                "next_follow_up_at",
+                "interview_at",
+                "resume_version",
+                "cover_letter_version",
+            }
+            details = {key: body[key] for key in detail_keys if key in body}
+            if details:
+                change = application_tracker.update_details(job_id, **details)
+                response["application_status"] = change.status
             if len(response) == 1:
                 raise ValueError("provide active, application_status, or contacted")
+            _audit("job_updated", job_id, body)
             self._json(response)
         except ValueError as exc:
             self._error(str(exc))
@@ -420,6 +470,12 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
+    if host not in {"127.0.0.1", "localhost", "::1"} and os.environ.get(
+        "JOB_RADAR_ALLOW_NONLOCAL_UI"
+    ) != "1":
+        raise ValueError(
+            "non-loopback UI binding requires JOB_RADAR_ALLOW_NONLOCAL_UI=1"
+        )
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     server = JobRadarServer((host, port))
     logging.info("Job Radar UI listening at http://%s:%d", host, port)

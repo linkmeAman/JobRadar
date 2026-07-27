@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -13,31 +14,10 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
 
+from . import storage
 
-DATABASE_PATH = Path("data") / "jobs.db"
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS seen_jobs (
-    job_id TEXT PRIMARY KEY,
-    title TEXT,
-    company TEXT,
-    site TEXT,
-    first_seen_at TIMESTAMP,
-    notification_payload TEXT,
-    notified_at TIMESTAMP,
-    expired_at TIMESTAMP,
-    is_active INTEGER NOT NULL DEFAULT 1
-)
-"""
-
-_FEEDBACK_SCHEMA = """
-CREATE TABLE IF NOT EXISTS job_feedback (
-    job_id TEXT PRIMARY KEY,
-    label TEXT NOT NULL CHECK(label IN ('relevant', 'irrelevant', 'applied')),
-    updated_at TIMESTAMP NOT NULL,
-    FOREIGN KEY(job_id) REFERENCES seen_jobs(job_id)
-)
-"""
+DATABASE_PATH = Path(os.environ.get("JOB_RADAR_DATABASE_PATH", "data/jobs.db"))
 
 _NOTIFICATION_FIELDS = (
     "title",
@@ -66,10 +46,19 @@ _TRACKING_QUERY_KEYS = {
     "ref",
     "refid",
 }
+_COMPANY_SUFFIXES = re.compile(
+    r"\b(incorporated|corporation|company|technologies|technology|limited|private|pvt|ltd|llc|inc|corp)\b"
+)
 
 
 def _text(value: Any) -> str:
     return "" if pd.isna(value) else str(value)
+
+
+def normalize_company(value: Any) -> str:
+    """Normalize common legal suffixes for company history and matching."""
+    text = re.sub(r"[^a-z0-9]+", " ", _text(value).lower()).strip()
+    return re.sub(r"\s+", " ", _COMPANY_SUFFIXES.sub(" ", text)).strip()
 
 
 def _job_id(title: Any, company: Any, site: Any) -> str:
@@ -124,27 +113,23 @@ def _has_value(value: Any) -> bool:
 
 
 def _initialize_schema(connection: sqlite3.Connection) -> None:
-    connection.execute(_SCHEMA)
-    columns = {
-        row[1] for row in connection.execute("PRAGMA table_info(seen_jobs)")
-    }
-    if "notification_payload" not in columns:
-        connection.execute(
-            "ALTER TABLE seen_jobs ADD COLUMN notification_payload TEXT"
-        )
-    if "notified_at" not in columns:
-        connection.execute(
-            "ALTER TABLE seen_jobs ADD COLUMN notified_at TIMESTAMP"
-        )
-    if "expired_at" not in columns:
-        connection.execute(
-            "ALTER TABLE seen_jobs ADD COLUMN expired_at TIMESTAMP"
-        )
-    if "is_active" not in columns:
-        connection.execute(
-            "ALTER TABLE seen_jobs ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
-        )
-    connection.execute(_FEEDBACK_SCHEMA)
+    storage.migrate(connection)
+
+
+def _connect(*, read_only: bool = False) -> sqlite3.Connection:
+    return storage.connect(DATABASE_PATH, read_only=read_only)
+
+
+def _record_duplicate(
+    connection: sqlite3.Connection, job_id: str, identity_type: str
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO dedupe_events(job_id, identity_type, detected_at)
+        VALUES (?, ?, ?)
+        """,
+        (job_id, identity_type, datetime.now(timezone.utc).isoformat()),
+    )
 
 
 def _legacy_matches_current_url(
@@ -168,7 +153,7 @@ def seen_status(df: pd.DataFrame) -> pd.Series:
     if not DATABASE_PATH.exists():
         return pd.Series(False, index=df.index, dtype=bool)
 
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = _connect(read_only=True)
     try:
         table = connection.execute(
             """
@@ -229,7 +214,7 @@ def filter_new(df: pd.DataFrame) -> pd.DataFrame:
 
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     new_positions: list[int] = []
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = _connect()
     try:
         _initialize_schema(connection)
         with connection:
@@ -250,13 +235,20 @@ def filter_new(df: pd.DataFrame) -> pd.DataFrame:
                     (primary_id,),
                 ).fetchone()
                 if existing:
+                    _record_duplicate(
+                        connection,
+                        primary_id,
+                        "url" if normalized_url else "legacy",
+                    )
                     connection.execute(
                         """
-                        UPDATE seen_jobs SET notification_payload = ?
+                        UPDATE seen_jobs
+                        SET notification_payload = ?,
+                            normalized_company = COALESCE(normalized_company, ?)
                         WHERE job_id = ? AND notified_at IS NULL
                             AND expired_at IS NULL
                         """,
-                        (payload, primary_id),
+                        (payload, normalize_company(company), primary_id),
                     )
                     continue
 
@@ -270,13 +262,16 @@ def filter_new(df: pd.DataFrame) -> pd.DataFrame:
                         (title, company, site),
                     ).fetchone()
                     if fallback:
+                        _record_duplicate(connection, fallback[0], "legacy")
                         connection.execute(
                             """
-                            UPDATE seen_jobs SET notification_payload = ?
+                            UPDATE seen_jobs
+                            SET notification_payload = ?,
+                                normalized_company = COALESCE(normalized_company, ?)
                             WHERE job_id = ? AND notified_at IS NULL
                                 AND expired_at IS NULL
                             """,
-                            (payload, fallback[0]),
+                            (payload, normalize_company(company), fallback[0]),
                         )
                         continue
 
@@ -298,12 +293,13 @@ def filter_new(df: pd.DataFrame) -> pd.DataFrame:
                         """
                         UPDATE seen_jobs
                         SET job_id = ?,
+                            normalized_company = ?,
                             notification_payload = CASE
                                 WHEN notified_at IS NULL AND expired_at IS NULL
                                 THEN ? ELSE notification_payload END
                         WHERE job_id = ?
                         """,
-                        (primary_id, payload, legacy_id),
+                        (primary_id, normalize_company(company), payload, legacy_id),
                     )
                     connection.execute(
                         """
@@ -325,16 +321,24 @@ def filter_new(df: pd.DataFrame) -> pd.DataFrame:
                             """,
                             (primary_id, legacy_id),
                         )
+                    _record_duplicate(connection, primary_id, "legacy_migrated")
                     continue
 
                 cursor = connection.execute(
                     """
                     INSERT OR IGNORE INTO seen_jobs
                         (job_id, title, company, site, first_seen_at,
-                         notification_payload)
-                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                         notification_payload, normalized_company)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
                     """,
-                    (primary_id, title, company, site, payload),
+                    (
+                        primary_id,
+                        title,
+                        company,
+                        site,
+                        payload,
+                        normalize_company(company),
+                    ),
                 )
                 if cursor.rowcount == 1:
                     new_positions.append(position)
@@ -349,7 +353,7 @@ def pending_notifications(limit: int | None = None) -> pd.DataFrame:
     if not DATABASE_PATH.exists():
         return pd.DataFrame()
 
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = _connect()
     try:
         _initialize_schema(connection)
         rows = connection.execute(
@@ -390,7 +394,7 @@ def expire_pending(days: int) -> int:
     """Expire undelivered jobs older than the configured retry window."""
     if days <= 0 or not DATABASE_PATH.exists():
         return 0
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = _connect()
     try:
         _initialize_schema(connection)
         with connection:
@@ -410,7 +414,7 @@ def expire_pending(days: int) -> int:
 
 
 def mark_notified(job_id: str) -> None:
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = _connect()
     try:
         with connection:
             connection.execute(
@@ -427,7 +431,7 @@ def mark_notified(job_id: str) -> None:
 def set_active(job_id_or_prefix: str, active: bool) -> str:
     """Enable or disable a stored listing from the pending queue."""
     job_id = resolve_job_id(job_id_or_prefix)
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = _connect()
     try:
         with connection:
             cursor = connection.execute(
@@ -449,7 +453,7 @@ def resolve_job_id(job_id_or_prefix: str) -> str:
     if not re.fullmatch(r"[0-9a-f]{6,64}", normalized):
         raise ValueError("job ID must contain 6-64 hexadecimal characters")
 
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = _connect()
     try:
         _initialize_schema(connection)
         rows = connection.execute(
@@ -471,15 +475,31 @@ def resolve_job_id(job_id_or_prefix: str) -> str:
     return exact[0] if exact else rows[0][0]
 
 
-def record_feedback(job_id_or_prefix: str, label: str) -> str:
+def record_feedback(
+    job_id_or_prefix: str, label: str, *, source: str = "manual"
+) -> str:
     """Attach a relevance label to one exact or uniquely prefixed job ID."""
     if label not in {"relevant", "irrelevant", "applied"}:
         raise ValueError("feedback must be relevant, irrelevant, or applied")
 
     job_id = resolve_job_id(job_id_or_prefix)
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = _connect()
     try:
         _initialize_schema(connection)
+        stored = connection.execute(
+            """
+            SELECT notification_payload, normalized_company, company
+            FROM seen_jobs WHERE job_id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+        payload: dict[str, Any] = {}
+        if stored and stored[0]:
+            try:
+                payload = json.loads(stored[0])
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
+        timestamp = datetime.now(timezone.utc).isoformat()
         with connection:
             connection.execute(
                 """
@@ -489,7 +509,28 @@ def record_feedback(job_id_or_prefix: str, label: str) -> str:
                     label = excluded.label,
                     updated_at = excluded.updated_at
                 """,
-                (job_id, label, datetime.now(timezone.utc).isoformat()),
+                (job_id, label, timestamp),
+            )
+            connection.execute(
+                """
+                INSERT INTO feedback_events
+                    (job_id, label, source, created_at, match_score,
+                     match_reasons, company)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    label,
+                    source,
+                    timestamp,
+                    payload.get("match_score"),
+                    payload.get("match_reasons"),
+                    (stored[1] if stored else None)
+                    or normalize_company(
+                        (stored[2] if stored else None)
+                        or payload.get("company")
+                    ),
+                ),
             )
         return job_id
     finally:
@@ -500,7 +541,7 @@ def feedback_adjustments(*, read_only: bool = False) -> dict[str, list[str]]:
     """Build conservative scoring hints from stored user labels."""
     if not DATABASE_PATH.exists():
         return {"preferred_skills": [], "penalized_companies": []}
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = _connect(read_only=read_only)
     try:
         if not read_only:
             _initialize_schema(connection)
@@ -513,7 +554,8 @@ def feedback_adjustments(*, read_only: bool = False) -> dict[str, list[str]]:
             return {"preferred_skills": [], "penalized_companies": []}
         rows = connection.execute(
             """
-            SELECT f.label, s.company, s.notification_payload
+            SELECT f.label, COALESCE(s.normalized_company, s.company),
+                   s.notification_payload
             FROM job_feedback f
             JOIN seen_jobs s ON s.job_id = f.job_id
             """
@@ -539,7 +581,7 @@ def feedback_adjustments(*, read_only: bool = False) -> dict[str, list[str]]:
                 ):
                     skill_counts[reason] = skill_counts.get(reason, 0) + 1
         elif label == "irrelevant" and company:
-            normalized = str(company).strip().lower()
+            normalized = normalize_company(company)
             company_counts[normalized] = company_counts.get(normalized, 0) + 1
     return {
         "preferred_skills": sorted(
@@ -548,4 +590,58 @@ def feedback_adjustments(*, read_only: bool = False) -> dict[str, list[str]]:
         "penalized_companies": sorted(
             company for company, count in company_counts.items() if count >= 1
         ),
+    }
+
+
+def metrics() -> dict[str, float | int]:
+    """Return small, database-backed ranking and delivery metrics."""
+    if not DATABASE_PATH.exists():
+        return {
+            "jobs": 0,
+            "notified": 0,
+            "applications": 0,
+            "feedback_events": 0,
+            "feedback_precision": 0.0,
+            "alert_to_application_conversion": 0.0,
+            "duplicate_rate": 0.0,
+        }
+    connection = _connect()
+    try:
+        jobs, notified = connection.execute(
+            "SELECT COUNT(*), SUM(notified_at IS NOT NULL) FROM seen_jobs"
+        ).fetchone()
+        applications = connection.execute(
+            "SELECT COUNT(*) FROM applications"
+        ).fetchone()[0]
+        feedback_events, positive = connection.execute(
+            """
+            SELECT COUNT(*), SUM(label IN ('relevant', 'applied'))
+            FROM feedback_events
+            """
+        ).fetchone()
+        duplicates = connection.execute(
+            "SELECT COUNT(*) FROM dedupe_events"
+        ).fetchone()[0]
+    finally:
+        connection.close()
+    jobs = int(jobs or 0)
+    notified = int(notified or 0)
+    feedback_events = int(feedback_events or 0)
+    positive = int(positive or 0)
+    return {
+        "jobs": jobs,
+        "notified": notified,
+        "applications": int(applications or 0),
+        "feedback_events": feedback_events,
+        "feedback_precision": round(positive / feedback_events, 4)
+        if feedback_events
+        else 0.0,
+        "alert_to_application_conversion": round(
+            int(applications or 0) / notified, 4
+        )
+        if notified
+        else 0.0,
+        "duplicate_rate": round(duplicates / (jobs + duplicates), 4)
+        if jobs + duplicates
+        else 0.0,
     }
