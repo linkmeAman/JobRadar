@@ -3,8 +3,9 @@
 Job Radar is a Python 3.10+ automation that builds searches from the latest
 resume, scrapes JobSpy providers independently, ranks listings, deduplicates
 them in SQLite, and sends the strongest new matches through Telegram. It runs
-to completion every 30 minutes under systemd; there is no server, UI, queue, or
-Google Sheets integration.
+to completion every 30 minutes under systemd. A small localhost-only UI is
+available for reports and manual triggers; there is no application framework,
+queue, or Google Sheets integration.
 
 ## Runtime flow
 
@@ -31,6 +32,7 @@ overlapping a systemd run.
 Radar/
 ├── job_radar/                 Python package
 │   ├── main.py                CLI and orchestration
+│   ├── web/                   standard-library report UI
 │   ├── scraper.py             JobSpy provider isolation
 │   ├── sources/               HN, Cutshort, and Hirist adapters
 │   ├── matcher.py             resume relevance rules
@@ -103,6 +105,21 @@ TELEGRAM_CHAT_ID=your_personal_chat_id
 ```
 
 Send `/start` to the bot before the first run. `.env` is ignored by Git.
+
+## Local UI
+
+The UI is a localhost-only, standard-library report page. It shows all
+received jobs, provider and match details, notification/application state,
+active or inactive controls, scrape history, and UI-trigger history.
+
+Start it from the repository root:
+
+\`\`\`bash
+python -m job_radar.web.server
+\`\`\`
+
+Open http://127.0.0.1:8765. The UI binds to localhost and has no
+authentication, so do not expose the port publicly.
 
 ## Resume automation and search generation
 
@@ -354,8 +371,10 @@ For `/opt/job-radar`:
 ```bash
 sudo cp deploy/job-radar.service /etc/systemd/system/
 sudo cp deploy/job-radar.timer /etc/systemd/system/
+sudo cp deploy/job-radar-web.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now job-radar.timer
+sudo systemctl enable --now job-radar-web.service
 sudo systemctl start job-radar.service
 ```
 
@@ -367,6 +386,14 @@ EnvironmentFile=/mnt/d/Radar/.env
 ExecStart=/mnt/d/Radar/.venv/bin/python -m job_radar.main
 ```
 
+The UI unit uses the same paths:
+
+\`\`\`ini
+WorkingDirectory=/mnt/d/Radar
+EnvironmentFile=/mnt/d/Radar/.env
+ExecStart=/mnt/d/Radar/.venv/bin/python -m job_radar.web.server --host 127.0.0.1 --port 8765
+\`\`\`
+
 Reload after editing the installed unit:
 
 ```bash
@@ -374,6 +401,7 @@ sudo systemctl daemon-reload
 sudo systemctl restart job-radar.timer
 systemctl list-timers job-radar.timer
 journalctl -u job-radar.service -n 100 --no-pager
+journalctl -u job-radar-web.service -n 100 --no-pager
 ```
 
 ## Troubleshooting

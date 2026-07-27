@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS seen_jobs (
     first_seen_at TIMESTAMP,
     notification_payload TEXT,
     notified_at TIMESTAMP,
-    expired_at TIMESTAMP
+    expired_at TIMESTAMP,
+    is_active INTEGER NOT NULL DEFAULT 1
 )
 """
 
@@ -137,6 +138,10 @@ def _initialize_schema(connection: sqlite3.Connection) -> None:
     if "expired_at" not in columns:
         connection.execute(
             "ALTER TABLE seen_jobs ADD COLUMN expired_at TIMESTAMP"
+        )
+    if "is_active" not in columns:
+        connection.execute(
+            "ALTER TABLE seen_jobs ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
         )
     connection.execute(_FEEDBACK_SCHEMA)
 
@@ -352,6 +357,7 @@ def pending_notifications(limit: int | None = None) -> pd.DataFrame:
             FROM seen_jobs
             WHERE notified_at IS NULL
                 AND expired_at IS NULL
+                AND is_active = 1
                 AND notification_payload IS NOT NULL
             ORDER BY first_seen_at, rowid
             """
@@ -392,6 +398,7 @@ def expire_pending(days: int) -> int:
                 UPDATE seen_jobs
                 SET expired_at = CURRENT_TIMESTAMP
                 WHERE notified_at IS NULL AND expired_at IS NULL
+                    AND is_active = 1
                     AND first_seen_at < datetime('now', ?)
                 """,
                 (f"-{days} days",),
@@ -414,6 +421,23 @@ def mark_notified(job_id: str) -> None:
             )
     finally:
         connection.close()
+
+
+def set_active(job_id_or_prefix: str, active: bool) -> str:
+    """Enable or disable a stored listing from the pending queue."""
+    job_id = resolve_job_id(job_id_or_prefix)
+    connection = sqlite3.connect(DATABASE_PATH)
+    try:
+        with connection:
+            cursor = connection.execute(
+                "UPDATE seen_jobs SET is_active = ? WHERE job_id = ?",
+                (1 if active else 0, job_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(f"no job matches ID {job_id_or_prefix}")
+    finally:
+        connection.close()
+    return job_id
 
 
 def resolve_job_id(job_id_or_prefix: str) -> str:

@@ -1,0 +1,10 @@
+[Unit]
+Description=Job Radar local web UI
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/job-radar
+EnvironmentFile=/opt/job-radar/.env
+ExecStart=/opt/job-radar/.venv/bin/python -m job_radar.web.server --host 127.0.0.1 --port 8765
+Restart=on-failure

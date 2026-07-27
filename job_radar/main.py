@@ -118,7 +118,9 @@ def _selected_searches(
     ]
 
 
-def run(*, dry_run: bool = False, explain: bool = False) -> None:
+def run(
+    *, dry_run: bool = False, explain: bool = False, mode: str = "normal"
+) -> dict[str, Any] | None:
     """Execute one locked scrape; diagnostic runs make no SQLite changes."""
     config = load_config()
     with run_lock.single_instance():
@@ -163,7 +165,7 @@ def run(*, dry_run: bool = False, explain: bool = False) -> None:
         run_id = (
             None
             if dry_run
-            else scrape_state.start_run(history_selections)
+            else scrape_state.start_run(history_selections, mode=mode)
         )
         provider_status: dict[str, Any] = {}
         counts = {
@@ -258,7 +260,7 @@ def run(*, dry_run: bool = False, explain: bool = False) -> None:
                     len(scraped),
                     len(matched),
                 )
-                return
+                return None
 
             new_jobs = dedupe.filter_new(matched)
             counts["new_count"] = len(new_jobs)
@@ -313,6 +315,7 @@ def run(*, dry_run: bool = False, explain: bool = False) -> None:
             counts["expired_count"],
             counts["sent_count"],
         )
+        return {"run_id": run_id, **counts}
 
 
 def _maybe_send_health_alert(

@@ -49,6 +49,7 @@ dedupe.py               job identity, delivery state, and feedback
 application_tracker.py  Telegram commands and follow-up reminders
 notifier.py             Telegram Bot API transport and formatting
 run_lock.py             single-instance protection
+web/                    localhost report UI and trigger API
 config.yaml             runtime settings and search definitions
 deploy/                 systemd service and timer
 tests/                  offline unit and integration tests
@@ -143,10 +144,16 @@ python -m job_radar.main
 python -m job_radar.main --dry-run
 python -m job_radar.main --explain
 python -m job_radar.main --feedback <job_id> <relevant|irrelevant|applied>
+python -m job_radar.web.server
 ```
 
 Dry-run and explain mode perform scraping and matching without Telegram calls
 or SQLite state changes.
+
+The local UI binds to 127.0.0.1:8765. It reads the existing SQLite tables,
+queues a background run with mode manual_ui, changes seen_jobs.is_active, and
+records every UI trigger in web_trigger_history. It has no public
+authentication layer and must remain localhost-only.
 
 ## Scheduling
 
