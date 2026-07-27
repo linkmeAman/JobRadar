@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
@@ -39,6 +40,12 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     for section in ("resume", "scraping", "matching"):
         if not isinstance(config.get(section), dict):
             raise ValueError(f"config.yaml must define {section} settings")
+    resume_override = os.environ.get("JOB_RADAR_RESUME_PATHS", "")
+    if resume_override.strip():
+        paths = [item.strip() for item in resume_override.split(",") if item.strip()]
+        if not paths:
+            raise ValueError("JOB_RADAR_RESUME_PATHS must contain a PDF path")
+        config["resume"]["paths"] = paths
     return config
 
 

@@ -42,10 +42,14 @@ Radar/
 │   ├── application_tracker.py Telegram commands and reminders
 │   ├── notifier.py            Telegram Bot API transport
 │   ├── scrape_state.py        cooldowns, rotation, and run history
+│   ├── scheduler.py            Docker scrape and backup loop
 │   ├── backup.py               SQLite backup and retention CLI
 │   └── semantic.py             optional borderline scoring
 ├── tests/                     offline test suite and fixtures
 ├── deploy/                    systemd service and timer
+├── Dockerfile                 Docker image definition
+├── docker-compose.yml         scheduler and UI services
+├── .env.example               credentials and Docker defaults template
 ├── data/                      runtime SQLite and resume cache
 ├── config.yaml                searches and runtime settings
 ├── requirements.txt           Python dependencies
@@ -374,6 +378,50 @@ Run the live pipeline without delivery or state changes:
 ```bash
 python -m job_radar.main --dry-run
 ```
+
+## Docker deployment
+
+Docker Compose is an alternative to the systemd services. The `scheduler`
+container runs one scrape every 30 minutes and creates a nightly SQLite backup;
+the `ui` container serves the dashboard on `127.0.0.1:8765`.
+
+Prepare the mounted resume directory and credentials:
+
+```bash
+mkdir -p resumes data
+cp /path/to/Aman_Singh.pdf resumes/
+cp /path/to/Aman_Singh_CV.pdf resumes/
+cp .env.example .env  # or create .env with the Telegram variables
+```
+
+The `.env` file must contain:
+
+```dotenv
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+```
+
+Start the containers:
+
+```bash
+docker compose up -d --build
+docker compose logs -f scheduler
+```
+
+Open the UI at http://127.0.0.1:8765. SQLite state, resume-derived profile
+data, and backups persist in the repository's `data/` directory. To use other
+resume filenames or a different cadence, set these in `.env`:
+
+```dotenv
+JOB_RADAR_RESUME_PATHS=/app/resumes/Aman_Singh.pdf,/app/resumes/Aman_Singh_CV.pdf
+JOB_RADAR_INTERVAL_SECONDS=1800
+JOB_RADAR_BACKUP_INTERVAL_SECONDS=86400
+JOB_RADAR_BACKUP_RETENTION_DAYS=14
+```
+
+Do not run the Docker scheduler and the systemd timer at the same time; choose
+one scheduler to avoid duplicate provider requests. Stop the Docker setup with
+`docker compose down` (the mounted data remains intact).
 
 ## Systemd installation
 

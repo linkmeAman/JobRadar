@@ -4,5 +4,6 @@ data/jobs.db
 data/backups/
 data/resume_profile.json
 data/job-radar.lock
+resumes/
 __pycache__/
 *.py[cod]

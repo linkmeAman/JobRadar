@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import types
 import unittest
+import os
 from contextlib import nullcontext
 from unittest.mock import patch
 
@@ -41,6 +42,21 @@ def _config() -> dict:
 
 
 class MainTests(unittest.TestCase):
+    def test_resume_paths_can_be_overridden_for_container_mounts(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "JOB_RADAR_RESUME_PATHS":
+                "/app/resumes/one.pdf,/app/resumes/two.pdf"
+            },
+            clear=False,
+        ):
+            config = main.load_config()
+        self.assertEqual(
+            config["resume"]["paths"],
+            ["/app/resumes/one.pdf", "/app/resumes/two.pdf"],
+        )
+
     def test_provider_alert_sends_once_for_degraded_provider(self) -> None:
         with patch(
             "job_radar.main.scrape_state.degraded_providers",

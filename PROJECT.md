@@ -18,12 +18,13 @@ resume PDFs
   -> run history
 ```
 
-The process runs to completion every 30 minutes under systemd. A filesystem
-lock prevents scheduled and manual runs from overlapping.
+The process runs to completion every 30 minutes under systemd or the Docker
+scheduler. A filesystem lock prevents scheduled and manual runs from
+overlapping.
 
 ```mermaid
 flowchart LR
-    timer[30-minute timer] --> main[job_radar.main]
+    timer[systemd timer or Docker scheduler] --> main[job_radar.main]
     main --> resume[Resume profile and search generation]
     main --> sources[JobSpy plus external sources]
     resume --> match[Matching and optional semantic score]
@@ -32,6 +33,7 @@ flowchart LR
     db --> telegram[Telegram alerts]
     telegram --> apps[Application status and reminders]
     main --> history[scrape_runs and health state]
+    main --> backup[nightly SQLite backup]
 ```
 
 ## Project structure
@@ -50,6 +52,7 @@ dedupe.py               job identity, delivery state, and feedback
 application_tracker.py  Telegram commands and follow-up reminders
 notifier.py             Telegram Bot API transport and formatting
 run_lock.py             single-instance protection
+scheduler.py            Docker scrape and backup loop
 web/                    localhost report UI and trigger API
 config.yaml             runtime settings and search definitions
 deploy/                 scraper, UI, and nightly backup units/timers
@@ -57,6 +60,11 @@ tests/                  offline unit and integration tests
 data/jobs.db            SQLite state, excluded from Git
 data/backups/           timestamped SQLite backups, excluded from Git
 ```
+
+Docker deployment uses `Dockerfile` and `docker-compose.yml`. The scheduler
+and UI containers share the `data/` and read-only `resumes/` mounts.
+`JOB_RADAR_RESUME_PATHS` overrides the host-specific resume paths in
+`config.yaml` for the container filesystem.
 
 ## Job sources
 

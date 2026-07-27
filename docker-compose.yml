@@ -1,0 +1,35 @@
+services:
+  scheduler:
+    build: .
+    command: ["python", "-m", "job_radar.scheduler"]
+    env_file:
+      - .env
+    environment:
+      JOB_RADAR_RESUME_PATHS: ${JOB_RADAR_RESUME_PATHS:-/app/resumes/Aman_Singh.pdf,/app/resumes/Aman_Singh_CV.pdf}
+      JOB_RADAR_INTERVAL_SECONDS: ${JOB_RADAR_INTERVAL_SECONDS:-1800}
+      JOB_RADAR_BACKUP_INTERVAL_SECONDS: ${JOB_RADAR_BACKUP_INTERVAL_SECONDS:-86400}
+      JOB_RADAR_BACKUP_PATH: ${JOB_RADAR_BACKUP_PATH:-/app/data/backups}
+      JOB_RADAR_BACKUP_RETENTION_DAYS: ${JOB_RADAR_BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - ./data:/app/data
+      - ./resumes:/app/resumes:ro
+    restart: unless-stopped
+    init: true
+
+  ui:
+    build: .
+    command: ["python", "-m", "job_radar.web.server", "--host", "0.0.0.0", "--port", "8765"]
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./resumes:/app/resumes:ro
+    ports:
+      - "127.0.0.1:8765:8765"
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/summary', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

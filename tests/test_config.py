@@ -19,6 +19,14 @@ class ConfigTests(unittest.TestCase):
         timer = Path("deploy/job-radar.timer").read_text(encoding="utf-8")
         self.assertIn("OnCalendar=*-*-* *:00/30:00", timer)
 
+    def test_docker_runtime_files_and_cadence(self) -> None:
+        self.assertTrue(Path("Dockerfile").is_file())
+        compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn("scheduler:", compose)
+        self.assertIn("ui:", compose)
+        self.assertIn("JOB_RADAR_INTERVAL_SECONDS", compose)
+        self.assertIn("127.0.0.1:8765:8765", compose)
+
     def test_rotation_and_cooldown_settings(self) -> None:
         scraping = self.config["scraping"]
         self.assertEqual(scraping["searches_per_run"], 2)
