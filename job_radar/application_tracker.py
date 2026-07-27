@@ -285,6 +285,27 @@ def _command_reply(text: str) -> str | None:
     return None
 
 
+def _callback_reply(data: str) -> str | None:
+    parts = data.split(":")
+    if len(parts) != 3 or parts[0] != "jr":
+        return None
+    action, job_id = parts[1], parts[2]
+    try:
+        if action == "applied":
+            change = mark_applied(job_id)
+            prefix = "Application saved" if change.created else "Already tracked"
+            return f"{prefix}: {change.job_id[:12]}"
+        if action == "contacted":
+            change = mark_contacted(job_id)
+            return f"Contact updated: {change.job_id[:12]}"
+        if action in {"relevant", "irrelevant"}:
+            saved = dedupe.record_feedback(job_id, action)
+            return f"Feedback saved: {saved[:12]} {action}"
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
 def process_telegram_commands() -> int:
     """Apply supported commands from the authorized Telegram chat."""
     _, configured_chat_id = notifier.get_credentials()
@@ -301,6 +322,20 @@ def process_telegram_commands() -> int:
             reply = _command_reply(text)
             if reply is not None:
                 notifier.send_text(reply)
+                processed += 1
+        callback = update.get("callback_query") or {}
+        callback_message = callback.get("message") or {}
+        callback_chat_id = str((callback_message.get("chat") or {}).get("id", ""))
+        callback_data = callback.get("data")
+        callback_id = callback.get("id")
+        if (
+            callback_chat_id == configured_chat_id
+            and isinstance(callback_data, str)
+            and isinstance(callback_id, str)
+        ):
+            reply = _callback_reply(callback_data)
+            if reply is not None:
+                notifier.answer_callback_query(callback_id, reply)
                 processed += 1
         _record_update(update_id)
     return processed

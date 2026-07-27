@@ -84,6 +84,23 @@ class NotifierTests(unittest.TestCase):
         message = notifier.format_job_message(self.job.iloc[0])
         self.assertIn("🆔 job-1", message)
 
+    def test_send_all_adds_inline_job_actions(self) -> None:
+        with patch(
+            "job_radar.notifier.requests.post",
+            return_value=FakeResponse(200, {"ok": True}),
+        ) as post:
+            notifier.send_all(self.job)
+
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(
+            payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"],
+            "jr:applied:job-1",
+        )
+        self.assertEqual(
+            payload["reply_markup"]["inline_keyboard"][1][1]["url"],
+            "https://example.test/job-1",
+        )
+
     def test_health_alert_uses_same_bot_api(self) -> None:
         with patch(
             "job_radar.notifier.requests.post",
@@ -108,3 +125,19 @@ class NotifierTests(unittest.TestCase):
         self.assertEqual(updates, [{"update_id": 42}])
         self.assertEqual(get.call_args.kwargs["params"]["offset"], 42)
         self.assertEqual(get.call_args.kwargs["params"]["timeout"], 0)
+        self.assertIn(
+            "callback_query",
+            get.call_args.kwargs["params"]["allowed_updates"],
+        )
+
+    def test_answer_callback_query_acknowledges_button_press(self) -> None:
+        with patch(
+            "job_radar.notifier.requests.post",
+            return_value=FakeResponse(200, {"ok": True}),
+        ) as post:
+            notifier.answer_callback_query("callback-1", "Saved")
+
+        self.assertEqual(
+            post.call_args.kwargs["json"],
+            {"callback_query_id": "callback-1", "text": "Saved"},
+        )

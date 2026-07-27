@@ -143,6 +143,52 @@ class ApplicationTrackerTests(unittest.TestCase):
         self.assertEqual(application_tracker.update_offset(), 42)
         fetch.assert_called_once_with(offset=None)
 
+    def test_inline_feedback_callback_uses_authorized_chat(self) -> None:
+        updates = [
+            {
+                "update_id": 50,
+                "callback_query": {
+                    "id": "callback-1",
+                    "message": {"chat": {"id": 111}},
+                    "data": f"jr:irrelevant:{self.job_id[:12]}",
+                },
+            },
+            {
+                "update_id": 51,
+                "callback_query": {
+                    "id": "callback-2",
+                    "message": {"chat": {"id": 222}},
+                    "data": f"jr:relevant:{self.job_id[:12]}",
+                },
+            },
+        ]
+        replies: list[tuple[str, str]] = []
+        with patch(
+            "job_radar.application_tracker.notifier.get_credentials",
+            return_value=("123:token", "111"),
+        ), patch(
+            "job_radar.application_tracker.notifier.fetch_updates",
+            return_value=updates,
+        ), patch(
+            "job_radar.application_tracker.notifier.answer_callback_query",
+            side_effect=lambda callback_id, text: replies.append((callback_id, text)),
+        ):
+            processed = application_tracker.process_telegram_commands()
+
+        self.assertEqual(processed, 1)
+        self.assertEqual(replies[0][0], "callback-1")
+        self.assertIn("irrelevant", replies[0][1])
+        self.assertEqual(application_tracker.update_offset(), 52)
+        connection = sqlite3.connect(application_tracker.DATABASE_PATH)
+        try:
+            label = connection.execute(
+                "SELECT label FROM job_feedback WHERE job_id = ?",
+                (self.job_id,),
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(label, "irrelevant")
+
     def test_stale_summary_is_sent_only_once_per_interval(self) -> None:
         applied_at = datetime(2026, 7, 1, tzinfo=timezone.utc)
         check_time = applied_at + timedelta(days=8)

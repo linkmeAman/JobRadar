@@ -133,6 +133,10 @@ Each job message includes a 12-character ID. Supported commands are:
 /status <id> <applied|screening|interview|offer|rejected|withdrawn>
 ```
 
+Job alerts also expose inline buttons for `Apply`, `Save`, `Reject`,
+`Contacted`, and `Open job`. Button presses use the same SQLite-backed
+feedback and application paths as the commands above.
+
 Commands are accepted only from `TELEGRAM_CHAT_ID`. The persisted Bot API
 offset prevents replay after restarts. Active applications with no contact for
 the configured number of days appear in one daily reminder; terminal statuses

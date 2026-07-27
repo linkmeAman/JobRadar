@@ -231,6 +231,15 @@ Telegram messages contain a short ID:
 🆔 1a2b3c4d5e6f
 ```
 
+Telegram alerts also include inline buttons:
+
+- `Apply`: records the job in application tracking and saves positive feedback.
+- `Save`: stores positive relevance feedback without marking an application.
+- `Reject`: stores `irrelevant` feedback, which can reduce similar company
+  matches later.
+- `Contacted`: refreshes the latest contact timestamp for tracked applications.
+- `Open job`: opens the listing URL.
+
 Use that ID to label the result:
 
 ```bash

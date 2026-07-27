@@ -16,6 +16,7 @@ import requests
 
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
 TELEGRAM_UPDATES_URL = "https://api.telegram.org/bot{token}/getUpdates"
+TELEGRAM_CALLBACK_URL = "https://api.telegram.org/bot{token}/answerCallbackQuery"
 SEND_DELAY_SECONDS = 0.3
 MAX_SEND_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = 1.0
@@ -155,13 +156,41 @@ def _retry_delay(response: requests.Response | None, attempt: int) -> float:
     return RETRY_BACKOFF_SECONDS * (2**attempt)
 
 
-def _send_message(url: str, chat_id: str, text: str) -> None:
+def job_reply_markup(row: pd.Series) -> dict[str, Any] | None:
+    """Return inline actions for one job alert."""
+    job_id = _value(row, "job_id")
+    if not _is_present(job_id):
+        return None
+    prefix = str(job_id)[:12]
+    keyboard = [
+        [
+            {"text": "Apply", "callback_data": f"jr:applied:{prefix}"},
+            {"text": "Save", "callback_data": f"jr:relevant:{prefix}"},
+            {"text": "Reject", "callback_data": f"jr:irrelevant:{prefix}"},
+        ],
+        [{"text": "Contacted", "callback_data": f"jr:contacted:{prefix}"}],
+    ]
+    job_url = _value(row, "job_url")
+    if _is_present(job_url):
+        keyboard[-1].append({"text": "Open job", "url": str(job_url)})
+    return {"inline_keyboard": keyboard}
+
+
+def _send_message(
+    url: str,
+    chat_id: str,
+    text: str,
+    reply_markup: dict[str, Any] | None = None,
+) -> None:
     """Send one message, retrying only temporary Telegram/network failures."""
     for attempt in range(MAX_SEND_ATTEMPTS):
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
         try:
             response = requests.post(
                 url,
-                json={"chat_id": chat_id, "text": text},
+                json=payload,
                 timeout=20,
             )
             response.raise_for_status()
@@ -206,7 +235,7 @@ def send_all(
     url = TELEGRAM_API_URL.format(token=token)
     rows = list(df.iterrows())
     for position, (_, row) in enumerate(rows):
-        _send_message(url, chat_id, format_job_message(row))
+        _send_message(url, chat_id, format_job_message(row), job_reply_markup(row))
 
         sent += 1
         if on_sent is not None:
@@ -223,12 +252,28 @@ def send_text(text: str) -> None:
     _send_message(TELEGRAM_API_URL.format(token=token), chat_id, text)
 
 
+def answer_callback_query(callback_query_id: str, text: str) -> None:
+    """Acknowledge one inline button press."""
+    token, _ = get_credentials()
+    try:
+        response = requests.post(
+            TELEGRAM_CALLBACK_URL.format(token=token),
+            json={"callback_query_id": callback_query_id, "text": text},
+            timeout=20,
+        )
+        response.raise_for_status()
+        if response.json().get("ok") is not True:
+            raise RuntimeError("Telegram rejected the callback answer")
+    except (requests.RequestException, ValueError):
+        raise RuntimeError("Telegram callback answer failed") from None
+
+
 def fetch_updates(offset: int | None = None) -> list[dict[str, Any]]:
     """Fetch pending message updates without using a Telegram SDK."""
     token, _ = get_credentials()
     params: dict[str, Any] = {
         "timeout": 0,
-        "allowed_updates": json.dumps(["message"]),
+        "allowed_updates": json.dumps(["message", "callback_query"]),
     }
     if offset is not None:
         params["offset"] = offset
