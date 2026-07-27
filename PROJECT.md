@@ -45,6 +45,11 @@ job-radar/
 ├── semantic.py            # optional embedding score for borderline jobs
 ├── run_lock.py            # manual/systemd single-instance protection
 ├── dedupe.py              # URL-aware SQLite dedupe, delivery, and feedback
+├── sources/
+│   ├── runner.py          # low-frequency scheduling and failure isolation
+│   ├── hacker_news.py     # HN Who's Hiring API adapter
+│   ├── cutshort.py        # Cutshort public job-card adapter
+│   └── hirist.py          # Hirist public category-feed adapter
 ├── notifier.py            # Telegram sendMessage wrapper
 ├── config.yaml            # search terms, locations, filters, telegram creds
 ├── requirements.txt
@@ -312,3 +317,25 @@ The current release also implements:
   `irrelevant`, and `applied` labels that conservatively adjust future scores.
 - **Optional semantic scoring:** disabled by default; when enabled, OpenAI
   embeddings add a bounded bonus only to deterministic borderline matches.
+
+## 15. High-Signal Source Expansion
+
+Three non-JobSpy sources now feed the same DataFrame, matcher, dedupe, pending
+queue, Telegram notifier, and run-history pipeline:
+
+- **HN Who's Hiring:** monthly top-level company posts discovered through HN
+  search and fetched with the official Firebase item API. Explicit remote
+  region restrictions participate in country eligibility.
+- **Cutshort:** bounded public API, Go, Python, and machine-learning search
+  pages parsed from server-rendered job cards.
+- **Hirist:** public backend and AI/ML structured category feeds with skills,
+  minimum experience, location, salary, company, and stable job URLs.
+
+Source attempts are persisted in `runtime_state`. Cutshort and Hirist run no
+more than once per six hours and HN no more than once per twelve hours, even
+though systemd still invokes Job Radar every 30 minutes. A 429 uses the same
+provider cooldown machinery as JobSpy. Other source failures remain isolated
+and are recorded in `scrape_runs`.
+
+Dry-run forces due-source evaluation for tuning but does not write source
+attempts, cooldowns, rotation state, dedupe state, or run history.

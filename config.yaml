@@ -67,6 +67,40 @@ semantic:
   max_jobs_per_run: 10
   fail_open: true
 
+external_sources:
+  # These adapters are intentionally slower than the 30-minute JobSpy loop.
+  # Each source records its last attempt and only runs at its own interval.
+  enabled: true
+  timeout_seconds: 30
+  user_agent: "JobRadar/1.0 personal job search"
+  cooldown_minutes: 120
+  max_cooldown_minutes: 720
+  sources:
+    hn_whos_hiring:
+      enabled: true
+      interval_hours: 12
+      max_comments: 150
+
+    cutshort:
+      enabled: true
+      interval_hours: 6
+      max_results_per_page: 15
+      pages:
+        - "https://cutshort.io/jobs/api-jobs"
+        - "https://cutshort.io/jobs/remote-golang-jobs"
+        - "https://cutshort.io/jobs/remote-python-jobs"
+        - "https://cutshort.io/jobs/remote-machine-learning-ml-jobs"
+
+    hirist:
+      enabled: true
+      interval_hours: 6
+      max_results_per_category: 20
+      categories:
+        - name: backend
+          page_url: "https://www.hirist.tech/c/backend-development-jobs"
+        - name: ai_ml
+          page_url: "https://www.hirist.tech/c/ai-ml-jobs"
+
 searches:
   # Resume-aligned backend searches. A six-hour window gives rotated searches
   # ample overlap while avoiding repeated 24-hour result pagination.

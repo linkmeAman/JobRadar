@@ -113,3 +113,10 @@ class ScraperTests(unittest.TestCase):
         self.assertIsInstance(outcome, scraper.ScrapeOutcome)
         self.assertEqual(outcome.provider_status["google"]["status"], "success")
         self.assertFalse(scrape_state.DATABASE_PATH.exists())
+
+    def test_scheduled_skip_does_not_count_as_provider_failure(self) -> None:
+        outcome = scraper.ScrapeOutcome(
+            pd.DataFrame(),
+            {"cutshort": {"status": "scheduled_skip"}},
+        )
+        self.assertFalse(outcome.all_providers_failed)

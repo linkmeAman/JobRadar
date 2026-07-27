@@ -2,3 +2,4 @@ python-jobspy
 PyYAML
 requests
 pypdf
+beautifulsoup4

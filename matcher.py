@@ -47,6 +47,23 @@ def _country_eligibility(
     remote = pd.notna(is_remote) and bool(is_remote)
     country = row.get("country")
     if remote:
+        restriction = row.get("remote_restriction")
+        if pd.notna(restriction) and str(restriction).strip():
+            restriction_text = str(restriction).strip()
+            normalized_restriction = restriction_text.lower()
+            allowed = {value.strip().lower() for value in allowed_countries}
+            eligible = (
+                not allowed
+                or any(
+                    country_name in normalized_restriction
+                    for country_name in allowed
+                )
+                or any(
+                    term in normalized_restriction
+                    for term in ("worldwide", "global", "anywhere")
+                )
+            )
+            return eligible, f"remote restriction: {restriction_text}"
         return True, "remote"
     if pd.isna(country) or not str(country).strip():
         return True, "country not listed"

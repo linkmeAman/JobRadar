@@ -57,3 +57,16 @@ class ConfigTests(unittest.TestCase):
             self.config["monitoring"]["all_provider_failure_alert_runs"], 2
         )
         self.assertFalse(self.config["semantic"]["enabled"])
+
+    def test_external_sources_are_low_frequency_and_bounded(self) -> None:
+        external = self.config["external_sources"]
+        self.assertTrue(external["enabled"])
+        for name, source in external["sources"].items():
+            self.assertTrue(source["enabled"], name)
+            self.assertGreaterEqual(source["interval_hours"], 6)
+        self.assertLessEqual(
+            external["sources"]["hn_whos_hiring"]["max_comments"], 200
+        )
+        self.assertLessEqual(
+            external["sources"]["cutshort"]["max_results_per_page"], 20
+        )

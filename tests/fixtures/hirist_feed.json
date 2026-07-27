@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "id": 1657001,
+      "title": "Python Backend Engineer",
+      "min": 2,
+      "max": 5,
+      "workFromHome": 1,
+      "createdTimeMs": 1785090600000,
+      "tags": [
+        {"id": 1, "name": "Python", "isMandatory": true},
+        {"id": 2, "name": "FastAPI", "isMandatory": true},
+        {"id": 3, "name": "AWS", "isMandatory": false}
+      ],
+      "locations": [{"id": 10, "name": "Anywhere in India"}],
+      "minSal": 8,
+      "maxSal": 16,
+      "hideSal": 0,
+      "companyData": {
+        "companyId": 100,
+        "companyName": "Example Labs"
+      }
+    }
+  ],
+  "page": 0,
+  "limit": 20,
+  "count": 1,
+  "totalJobs": 1,
+  "hasMore": false
+}

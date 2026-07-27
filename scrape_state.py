@@ -260,6 +260,59 @@ def select_searches(
     return selected + list(always_run)
 
 
+def source_due(
+    source: str,
+    interval_hours: float,
+    *,
+    now: datetime | None = None,
+    read_only: bool = False,
+) -> bool:
+    """Return whether a low-frequency external source should run."""
+    if interval_hours <= 0 or not DATABASE_PATH.exists():
+        return True
+    connection = _connect_read_only() if read_only else _connect()
+    key = f"external_source_last_attempt:{source}"
+    try:
+        if read_only and not connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'runtime_state'
+            """
+        ).fetchone():
+            return True
+        row = connection.execute(
+            "SELECT value FROM runtime_state WHERE key = ?", (key,)
+        ).fetchone()
+    finally:
+        connection.close()
+    if not row:
+        return True
+    last_attempt = datetime.fromisoformat(row[0])
+    return (now or _now()) >= last_attempt + timedelta(hours=interval_hours)
+
+
+def record_source_attempt(
+    source: str, *, now: datetime | None = None
+) -> None:
+    """Persist the attempt time used to enforce source-specific intervals."""
+    connection = _connect()
+    try:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO runtime_state (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (
+                    f"external_source_last_attempt:{source}",
+                    (now or _now()).isoformat(),
+                ),
+            )
+    finally:
+        connection.close()
+
+
 def start_run(
     selected_searches: Sequence[Mapping[str, Any]], mode: str = "normal"
 ) -> int:

@@ -157,3 +157,70 @@ class MainTests(unittest.TestCase):
         filter_new.assert_not_called()
         send_all.assert_not_called()
         self.assertFalse(run_all.call_args.kwargs["persist_state"])
+
+    def test_external_jobs_join_jobspy_results_before_matching(self) -> None:
+        config = _config()
+        config["external_sources"] = {
+            "enabled": True,
+            "sources": {
+                "cutshort": {"enabled": True, "interval_hours": 6}
+            },
+        }
+        jobspy_jobs = pd.DataFrame(
+            [
+                {
+                    "title": "Backend Engineer",
+                    "company": "JobSpy Co",
+                    "site": "google",
+                }
+            ]
+        )
+        external_jobs = pd.DataFrame(
+            [
+                {
+                    "title": "Python Engineer",
+                    "company": "Cutshort Co",
+                    "site": "cutshort",
+                }
+            ]
+        )
+        jobspy_outcome = scraper.ScrapeOutcome(
+            jobspy_jobs, {"google": {"status": "success"}}
+        )
+        external_outcome = scraper.ScrapeOutcome(
+            external_jobs, {"cutshort": {"status": "success"}}
+        )
+
+        def evaluate(jobs, *_args, **_kwargs):
+            self.assertEqual(len(jobs), 2)
+            return jobs.assign(
+                required_experience=None,
+                country_eligible=True,
+                country_eligibility="country not listed",
+                exclusion_reason=None,
+                match_score=8,
+                match_reasons="backend",
+                matched=True,
+            )
+
+        with patch("main.load_config", return_value=config), patch(
+            "main.run_lock.single_instance", return_value=nullcontext()
+        ), patch(
+            "main.resume_profile.load_or_refresh",
+            return_value={"skills": ["python"], "roles": ["backend engineer"]},
+        ), patch(
+            "main._selected_searches", return_value=config["searches"]
+        ), patch(
+            "main.scraper.run_all", return_value=jobspy_outcome
+        ), patch(
+            "main.source_runner.run_all", return_value=external_outcome
+        ), patch(
+            "main.dedupe.feedback_adjustments", return_value={}
+        ), patch(
+            "main.matcher.evaluate_jobs", side_effect=evaluate
+        ), patch(
+            "main.matcher.select_matches", return_value=pd.DataFrame()
+        ), patch(
+            "main._print_explanations"
+        ):
+            main.main(["--dry-run"])

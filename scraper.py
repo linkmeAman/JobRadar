@@ -24,9 +24,14 @@ class ScrapeOutcome:
 
     @property
     def all_providers_failed(self) -> bool:
-        return bool(self.provider_status) and all(
-            state.get("status") != "success"
+        attempted = [
+            state
             for state in self.provider_status.values()
+            if state.get("status") != "scheduled_skip"
+        ]
+        return bool(attempted) and all(
+            state.get("status") != "success"
+            for state in attempted
         )
 
 

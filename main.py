@@ -20,6 +20,7 @@ import scrape_state
 import scraper
 import search_generator
 import semantic
+from sources import runner as source_runner
 
 
 CONFIG_PATH = Path("config.yaml")
@@ -128,13 +129,31 @@ def run(*, dry_run: bool = False, explain: bool = False) -> None:
             resume.get("cache_path", "data/resume_profile.json"),
         )
         selected = _selected_searches(config, profile, advance=not dry_run)
+        external_names = source_runner.configured_names(
+            config.get("external_sources", {})
+        )
         logging.info(
             "selected_searches=%s",
             ",".join(str(search.get("name", "unnamed")) for search in selected),
         )
+        logging.info(
+            "external_sources=%s",
+            ",".join(external_names) if external_names else "none",
+        )
 
         started_at = datetime.now(timezone.utc)
-        run_id = None if dry_run else scrape_state.start_run(selected)
+        history_selections = [
+            *selected,
+            *[
+                {"name": f"source:{source_name}"}
+                for source_name in external_names
+            ],
+        ]
+        run_id = (
+            None
+            if dry_run
+            else scrape_state.start_run(history_selections)
+        )
         provider_status: dict[str, Any] = {}
         counts = {
             "scraped_count": 0,
@@ -164,9 +183,35 @@ def run(*, dry_run: bool = False, explain: bool = False) -> None:
                 outcome = scraper.ScrapeOutcome(
                     jobs=outcome, provider_status={}
                 )
-            scraped = outcome.jobs
-            provider_status = outcome.provider_status
-            all_failed = outcome.all_providers_failed
+            external_outcome = source_runner.run_all(
+                config.get("external_sources", {}),
+                persist_state=not dry_run,
+                force=dry_run,
+            )
+            frames = [
+                frame
+                for frame in (outcome.jobs, external_outcome.jobs)
+                if not frame.empty
+            ]
+            scraped = (
+                pd.concat(
+                    [
+                        frame.dropna(axis=1, how="all")
+                        for frame in frames
+                    ],
+                    ignore_index=True,
+                    sort=False,
+                )
+                if frames
+                else pd.DataFrame()
+            )
+            provider_status = {
+                **outcome.provider_status,
+                **external_outcome.provider_status,
+            }
+            all_failed = scraper.ScrapeOutcome(
+                scraped, provider_status
+            ).all_providers_failed
             counts["scraped_count"] = len(scraped)
 
             feedback = dedupe.feedback_adjustments(read_only=dry_run)

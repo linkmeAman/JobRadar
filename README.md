@@ -12,6 +12,7 @@ Google Sheets integration.
 resume PDFs
   -> cached roles and skills
   -> rotating resume-generated JobSpy searches
+  -> scheduled HN, Cutshort, and Hirist source adapters
   -> per-provider scrape, cooldown, and health status
   -> deterministic exclusions and relevance score
   -> optional semantic score for borderline jobs
@@ -60,6 +61,32 @@ Indeed entries continue to obey JobSpy's constraint: they include
 `country_indeed` and do not combine `hours_old` with both `job_type` and
 `is_remote`.
 
+## Additional high-signal sources
+
+Job Radar also ingests three sources that are not supported by JobSpy:
+
+- **HN Who's Hiring:** locates the newest monthly thread through the public
+  HN Algolia search and reads top-level company posts through the
+  [official Hacker News API](https://github.com/HackerNews/API). Remote posts
+  explicitly restricted to the US, Canada, Europe, or the Americas are
+  rejected by the existing country filter.
+- **Cutshort:** reads bounded backend, API, Python, Go, and machine-learning
+  search pages. Public job cards provide the title, company, experience,
+  location, salary, description, and stable application URL.
+- **Hirist:** reads the public backend and AI/ML category feeds used by
+  Hirist's own job pages. Skills and minimum experience are converted into
+  the same fields consumed by the resume matcher.
+
+These adapters require no account credentials. They run independently, so a
+failure cannot discard JobSpy or another source's results. Cutshort and Hirist
+run at most every six hours; HN runs every twelve hours. Attempt times,
+results, errors, and rate-limit cooldowns are stored in the same SQLite state
+and `scrape_runs` history as JobSpy providers.
+
+Wellfound, Instahyre, Turing, Blind, and YC Work at a Startup are not scraped.
+They either require an authenticated workflow, are not conventional job feeds,
+or did not expose a sufficiently stable public interface for this release.
+
 ## Safe tuning with dry-run
 
 This is the recommended first test after changing a resume or matching rule:
@@ -75,7 +102,7 @@ python main.py --explain
 ```
 
 The diagnostic run performs the real resume refresh, query selection, scrape,
-and matching, but it does not:
+all enabled external sources, and matching, but it does not:
 
 - validate or call Telegram;
 - advance the search rotation cursor;
@@ -210,6 +237,10 @@ working if the optional request fails.
 - `scraping.cooldown_minutes`: first cooldown after a provider HTTP 429.
 - `scraping.max_cooldown_minutes`: exponential cooldown ceiling.
 - `dynamic_searches.*`: generated query location, freshness, sites, and size.
+- `external_sources.sources.*.interval_hours`: minimum adapter interval.
+- `external_sources.sources.hn_whos_hiring.max_comments`: monthly HN post cap.
+- `external_sources.sources.cutshort.pages`: bounded public search pages.
+- `external_sources.sources.hirist.categories`: backend and AI/ML feeds.
 - `matching.minimum_score`: alert threshold.
 - `matching.max_alerts_per_run`: Telegram cap per run.
 - `matching.pending_expiry_days`: pending retry lifetime.
@@ -280,6 +311,8 @@ journalctl -u job-radar.service -n 100 --no-pager
 - `another Job Radar run is already active`: wait for the current manual or
   scheduled run to finish.
 - `skipped=cooldown`: that provider is inside its persisted 429 cooldown.
+- `skipped=interval`: the external source completed its configured interval
+  recently; this is expected during most 30-minute runs.
 - `matched=0`: inspect `python main.py --dry-run` before lowering the threshold.
 - `pending>queued`: the alert cap is working; remaining jobs stay pending.
 - Telegram 401: token invalid or revoked.

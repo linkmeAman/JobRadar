@@ -154,3 +154,26 @@ class MatcherTests(unittest.TestCase):
             normal.iloc[0]["match_score"] - 1,
         )
         self.assertIn("feedback", adjusted.iloc[0]["match_reasons"])
+
+    def test_remote_region_restriction_is_country_checked(self) -> None:
+        jobs = pd.DataFrame(
+            [
+                {
+                    "title": "Backend Engineer",
+                    "description": "Python and FastAPI",
+                    "is_remote": True,
+                    "remote_restriction": "United States",
+                }
+            ]
+        )
+        evaluated = matcher.evaluate_jobs(
+            jobs,
+            {"skills": ["python", "fastapi"]},
+            minimum_score=1,
+            allowed_countries=["India"],
+        )
+        self.assertFalse(evaluated.iloc[0]["country_eligible"])
+        self.assertIn(
+            "country not allowed",
+            evaluated.iloc[0]["exclusion_reason"],
+        )
