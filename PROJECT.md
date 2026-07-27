@@ -150,10 +150,15 @@ python -m job_radar.web.server
 Dry-run and explain mode perform scraping and matching without Telegram calls
 or SQLite state changes.
 
-The local UI binds to 127.0.0.1:8765. It reads the existing SQLite tables,
-queues a background run with mode manual_ui, changes seen_jobs.is_active, and
-records every UI trigger in web_trigger_history. It has no public
-authentication layer and must remain localhost-only.
+The local UI binds to 127.0.0.1:8765. Its Dashboard, Jobs, Applications, and
+History tabs read the existing SQLite tables. Jobs can be searched, filtered,
+sorted, paginated, opened for full details, activated/deactivated, and moved
+through application statuses. Application changes update the same
+`applications` table used by Telegram commands, while contact timestamps power
+the existing follow-up reminders. The Run scraper button queues a background
+run with mode `manual_ui`, and every trigger is recorded in
+`web_trigger_history`. It has no public authentication layer and must remain
+localhost-only.
 
 ## Scheduling
 

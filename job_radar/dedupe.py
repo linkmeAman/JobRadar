@@ -50,6 +50,7 @@ _NOTIFICATION_FIELDS = (
     "max_amount",
     "currency",
     "is_remote",
+    "description",
     "match_score",
     "match_reasons",
 )

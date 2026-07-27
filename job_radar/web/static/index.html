@@ -5,137 +5,150 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Job Radar</title>
   <style>
-    :root { color-scheme: light; font: 14px/1.4 system-ui, sans-serif; }
-    body { margin: 0; background: #f4f5f7; color: #202124; }
-    header { background: #202124; color: white; padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-    h1, h2 { margin: 0; } h1 { font-size: 21px; } h2 { font-size: 17px; margin-bottom: 10px; }
-    main { max-width: 1280px; margin: 22px auto; padding: 0 16px 36px; }
-    button, select { border: 1px solid #c8ccd1; border-radius: 5px; padding: 8px 11px; background: white; cursor: pointer; }
-    button.primary { background: #1769aa; border-color: #1769aa; color: white; }
-    button:disabled { opacity: .55; cursor: wait; }
-    .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 22px; }
-    .card, section { background: white; border: 1px solid #e0e2e5; border-radius: 7px; padding: 14px; }
-    .card strong { display: block; font-size: 24px; margin-top: 4px; }
-    .muted { color: #6b7075; }
-    section { margin-top: 16px; overflow: auto; }
-    .toolbar { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-bottom: 8px; }
-    table { width: 100%; border-collapse: collapse; min-width: 780px; }
-    th, td { text-align: left; padding: 9px 7px; border-bottom: 1px solid #eceef0; vertical-align: top; }
-    th { color: #656a70; font-weight: 600; font-size: 12px; }
-    .id { font: 11px ui-monospace, monospace; color: #62676d; }
-    .pill { display: inline-block; padding: 2px 7px; border-radius: 10px; background: #edf1f5; font-size: 12px; white-space: nowrap; }
-    .pill.pending { background: #fff1c7; }
-    .pill.applied, .pill.interview, .pill.offer { background: #d9f3e2; }
-    .pill.inactive, .pill.rejected, .pill.expired { background: #f7d9d9; }
-    a { color: #1769aa; }
-    #message { min-height: 20px; margin: 8px 0; color: #1769aa; }
-    @media (max-width: 800px) {
-      .cards { grid-template-columns: repeat(2, 1fr); }
-      header { align-items: flex-start; flex-direction: column; }
-    }
+    :root { color-scheme: light; font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; --ink:#202124; --muted:#69707a; --line:#e1e4e8; --blue:#1769aa; --soft:#f5f7f9; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:#f3f5f7; }
+    header { display:flex; align-items:center; gap:12px; padding:16px 28px; color:white; background:#202124; }
+    header h1 { margin:0 auto 0 0; font-size:24px; letter-spacing:.2px; }
+    button, select, input { font:inherit; }
+    button { border:1px solid #c8ced6; border-radius:6px; background:white; color:var(--ink); padding:8px 12px; cursor:pointer; }
+    button:hover { background:#f0f3f6; }
+    button.primary { border-color:var(--blue); background:var(--blue); color:#fff; }
+    button.danger { color:#a12622; }
+    nav { display:flex; gap:4px; padding:10px 28px 0; background:#fff; border-bottom:1px solid var(--line); }
+    nav button { border:0; border-bottom:3px solid transparent; border-radius:0; color:var(--muted); padding:10px 14px; background:transparent; }
+    nav button.active { border-bottom-color:var(--blue); color:var(--blue); font-weight:600; }
+    main { max-width:1500px; margin:0 auto; padding:28px; }
+    .message { min-height:24px; margin-bottom:12px; color:var(--muted); }
+    .message.error { color:#a12622; }
+    .cards { display:grid; grid-template-columns:repeat(5,minmax(130px,1fr)); gap:12px; margin-bottom:22px; }
+    .card, .panel { background:#fff; border:1px solid var(--line); border-radius:8px; box-shadow:0 1px 2px #00000008; }
+    .card { padding:17px; }
+    .card span { color:var(--muted); }
+    .card strong { display:block; margin-top:6px; font-size:26px; }
+    .panel { padding:18px; margin-bottom:18px; overflow:hidden; }
+    .panel h2 { margin:0 0 14px; font-size:18px; }
+    .toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px; }
+    .toolbar input { min-width:240px; flex:1; }
+    input, select { border:1px solid #c8ced6; border-radius:6px; padding:8px 10px; background:#fff; color:var(--ink); }
+    .table-wrap { overflow:auto; }
+    table { width:100%; border-collapse:collapse; min-width:900px; }
+    th, td { border-bottom:1px solid var(--line); padding:11px 9px; text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-weight:500; font-size:13px; white-space:nowrap; }
+    td small, .muted { color:var(--muted); }
+    td.job-cell { min-width:280px; }
+    .job-title { display:block; color:var(--blue); text-decoration:none; font-weight:600; margin-bottom:2px; }
+    .job-title:hover { text-decoration:underline; }
+    .chips { display:flex; flex-wrap:wrap; gap:4px; }
+    .chip { display:inline-block; border-radius:999px; padding:3px 8px; background:#eef1f4; font-size:12px; white-space:nowrap; }
+    .chip.pending { background:#fff0c9; }
+    .chip.notified, .chip.applied, .chip.interview, .chip.offer { background:#dff3e5; }
+    .chip.inactive, .chip.expired, .chip.rejected, .chip.withdrawn { background:#ececec; }
+    .actions { display:flex; flex-wrap:wrap; gap:5px; min-width:170px; }
+    .actions select { max-width:130px; padding:6px; }
+    .pager { display:flex; justify-content:space-between; align-items:center; margin-top:14px; color:var(--muted); }
+    .pager .buttons { display:flex; gap:6px; }
+    .empty { padding:28px; text-align:center; color:var(--muted); }
+    dialog { width:min(760px, calc(100vw - 32px)); border:0; border-radius:9px; padding:0; box-shadow:0 16px 60px #0005; }
+    dialog::backdrop { background:#0007; }
+    .dialog-head { display:flex; gap:16px; padding:20px 22px; border-bottom:1px solid var(--line); }
+    .dialog-head h2 { margin:0 auto 0 0; font-size:20px; }
+    .dialog-body { padding:20px 22px; }
+    .detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-bottom:18px; }
+    .detail-grid strong { display:block; margin-top:2px; }
+    .description { white-space:pre-wrap; max-height:280px; overflow:auto; background:var(--soft); padding:12px; border-radius:6px; }
+    .run-status { text-transform:capitalize; }
+    [hidden] { display:none !important; }
+    @media (max-width:800px) { header { padding:14px 16px; } nav { padding-left:16px; overflow:auto; } main { padding:18px 16px; } .cards { grid-template-columns:repeat(2,1fr); } .detail-grid { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
   <header>
     <h1>Job Radar</h1>
-    <div><button id="trigger" class="primary">Run scraper</button> <button id="refresh">Refresh</button></div>
+    <button class="primary" id="runButton">Run scraper</button>
+    <button id="refreshButton">Refresh</button>
   </header>
+  <nav aria-label="Main navigation">
+    <button class="active" data-view="dashboard">Dashboard</button>
+    <button data-view="jobs">Jobs</button>
+    <button data-view="applications">Applications</button>
+    <button data-view="history">History</button>
+  </nav>
   <main>
-    <div id="message"></div>
-    <div class="cards">
-      <div class="card">All jobs<strong id="total">-</strong></div>
-      <div class="card">Active<strong id="active">-</strong></div>
-      <div class="card">Pending<strong id="pending">-</strong></div>
-      <div class="card">Applied<strong id="applied">-</strong></div>
-      <div class="card">Last run<strong id="lastRun">-</strong></div>
-    </div>
+    <div id="message" class="message" role="status"></div>
 
-    <section>
-      <div class="toolbar"><h2>Jobs received</h2>
-        <select id="filter">
-          <option value="all">All</option><option value="pending">Pending</option>
-          <option value="notified">Notified</option><option value="applied">Applied</option>
-          <option value="inactive">Inactive</option><option value="expired">Expired</option>
-        </select>
+    <section id="dashboardView">
+      <div class="cards" id="cards"></div>
+      <div class="panel"><h2>Recent jobs</h2><div id="recentJobs"></div></div>
+      <div class="panel"><h2>Latest run</h2><div id="latestRun"></div></div>
+    </section>
+
+    <section id="jobsView" hidden>
+      <div class="panel">
+        <h2>Jobs received</h2>
+        <div class="toolbar">
+          <input id="jobSearch" type="search" placeholder="Search title or company" aria-label="Search jobs">
+          <select id="jobState" aria-label="Filter job state"><option value="all">All job states</option><option value="pending">Pending</option><option value="notified">Notified</option><option value="expired">Expired</option><option value="inactive">Inactive</option></select>
+          <select id="applicationState" aria-label="Filter application state"><option value="all">All application states</option><option value="none">Not applied</option><option value="applied">Applied</option><option value="screening">Screening</option><option value="interview">Interview</option><option value="offer">Offer</option><option value="rejected">Rejected</option><option value="withdrawn">Withdrawn</option></select>
+          <select id="jobSort" aria-label="Sort jobs"><option value="newest">Newest</option><option value="score">Best match</option><option value="company">Company</option></select>
+        </div>
+        <div id="jobsTable"></div>
+        <div id="jobsPager" class="pager"></div>
       </div>
-      <table><thead><tr><th>Job</th><th>Source</th><th>Received</th><th>State</th><th>Match</th><th>Active</th></tr></thead><tbody id="jobs"></tbody></table>
     </section>
-    <section><h2>Scrape history</h2>
-      <table><thead><tr><th>Run</th><th>Started</th><th>Mode</th><th>Status</th><th>Scraped</th><th>Matched</th><th>Sent</th><th>Error</th></tr></thead><tbody id="runs"></tbody></table>
+
+    <section id="applicationsView" hidden>
+      <div class="panel">
+        <h2>Applications and follow-ups</h2>
+        <div class="toolbar"><select id="followupFilter" aria-label="Filter follow-ups"><option value="all">All applications</option><option value="due">Follow-up due</option><option value="active">Active applications</option></select></div>
+        <div id="applicationsTable"></div>
+        <div id="applicationsPager" class="pager"></div>
+      </div>
     </section>
-    <section><h2>UI trigger history</h2>
-      <table><thead><tr><th>Trigger</th><th>Requested</th><th>Status</th><th>Run</th><th>Error</th></tr></thead><tbody id="triggers"></tbody></table>
+
+    <section id="historyView" hidden>
+      <div class="panel"><h2>Scrape runs</h2><div id="runsTable"></div></div>
+      <div class="panel"><h2>Manual trigger history</h2><div id="triggersTable"></div></div>
     </section>
   </main>
+
+  <dialog id="detailsDialog">
+    <div class="dialog-head"><h2 id="detailsTitle">Job details</h2><button id="closeDetails" aria-label="Close details">Close</button></div>
+    <div class="dialog-body" id="detailsBody"></div>
+  </dialog>
+
   <script>
+    const state = { view: 'dashboard', jobs: [], runs: [], triggers: [], summary: null, jobPage: 1, appPage: 1, pageSize: 25 };
+    const statuses = ['applied', 'screening', 'interview', 'offer', 'rejected', 'withdrawn'];
     const $ = id => document.getElementById(id);
-    const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    const date = value => value ? new Date(value).toLocaleString() : '-';
-    async function api(path, options) {
-      const response = await fetch(path, options);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || response.statusText);
-      return data;
-    }
-    function pill(status) { return '<span class="pill ' + esc(status) + '">' + esc(status) + '</span>'; }
-    async function refresh() {
-      try {
-        const filter = encodeURIComponent($('filter').value);
-        const [summary, jobs, runs, triggers] = await Promise.all([
-          api('/api/summary'), api('/api/jobs?status=' + filter), api('/api/runs'), api('/api/triggers')
-        ]);
-        $('total').textContent = summary.total;
-        $('active').textContent = summary.active;
-        $('pending').textContent = summary.pending;
-        $('applied').textContent = summary.applied;
-        $('lastRun').textContent = summary.last_run ? summary.last_run.status : 'none';
-        $('jobs').innerHTML = jobs.map(job => '<tr><td><a href="' + esc(job.job_url || '#') + '" target="_blank">' +
-          esc(job.title || 'Untitled') + '</a><br><span class="muted">' + esc(job.company || 'Unknown') +
-          '</span><br><span class="id">' + esc(job.job_id.slice(0, 12)) + '</span></td><td>' +
-          esc(job.site) + '</td><td>' + date(job.first_seen_at) + '</td><td>' + pill(job.status) +
-          (job.application_status ? '<br>' + pill(job.application_status) : '') + '</td><td>' +
-          esc(job.match_score ?? '-') + '<br><span class="muted">' + esc(job.match_reasons || '') +
-          '</span></td><td><button data-id="' + esc(job.job_id) + '" data-active="' + job.is_active + '">' +
-          (job.is_active ? 'Active' : 'Inactive') + '</button></td></tr>').join('') ||
-          '<tr><td colspan="6" class="muted">No jobs recorded.</td></tr>';
-        $('runs').innerHTML = runs.map(run => '<tr><td>' + run.run_id + '</td><td>' + date(run.started_at) +
-          '</td><td>' + esc(run.mode) + '</td><td>' + pill(run.status) + '</td><td>' + run.scraped_count +
-          '</td><td>' + run.matched_count + '</td><td>' + run.sent_count + '</td><td>' +
-          esc(run.error || '') + '</td></tr>').join('') ||
-          '<tr><td colspan="8" class="muted">No runs recorded.</td></tr>';
-        $('triggers').innerHTML = triggers.map(item => '<tr><td>' + item.trigger_id + '</td><td>' +
-          date(item.requested_at) + '</td><td>' + pill(item.status) + '</td><td>' + (item.run_id || '-') +
-          '</td><td>' + esc(item.error || '') + '</td></tr>').join('') ||
-          '<tr><td colspan="5" class="muted">No UI triggers recorded.</td></tr>';
-        document.querySelectorAll('[data-id]').forEach(button => button.onclick = async () => {
-          button.disabled = true;
-          try {
-            await api('/api/jobs/' + encodeURIComponent(button.dataset.id), {
-              method: 'PATCH', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({active: button.dataset.active !== 'true'})
-            });
-            await refresh();
-          } catch (error) { show(error.message); button.disabled = false; }
-        });
-      } catch (error) { show(error.message); }
-    }
-    function show(message) {
-      $('message').textContent = message;
-      setTimeout(() => { if ($('message').textContent === message) $('message').textContent = ''; }, 5000);
-    }
-    $('refresh').onclick = refresh;
-    $('filter').onchange = refresh;
-    $('trigger').onclick = async () => {
-      $('trigger').disabled = true;
-      try {
-        const result = await api('/api/triggers', {method: 'POST'});
-        show('Trigger #' + result.trigger_id + ' queued.');
-        await refresh();
-      } catch (error) { show(error.message); }
-      finally { $('trigger').disabled = false; }
-    };
-    refresh();
-    setInterval(refresh, 10000);
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+    const safeUrl = value => /^https?:\/\//i.test(value || '') ? value : '#';
+    const dateText = value => value ? new Date(value).toLocaleString() : '—';
+    const moneyText = job => job.min_amount == null && job.max_amount == null ? '' : `${job.currency || ''} ${job.min_amount ?? ''}${job.max_amount != null ? '–' + job.max_amount : ''}`.trim();
+    const reasonsList = job => Array.isArray(job.match_reasons) ? job.match_reasons : typeof job.match_reasons === 'string' ? job.match_reasons.split(',').map(reason => reason.trim()).filter(Boolean) : [];
+    const due = job => ['applied','screening','interview'].includes(job.application_status) && (!job.last_contact || Date.now() - new Date(job.last_contact).getTime() > 7 * 86400000);
+    function message(text, error=false) { $('message').textContent = text || ''; $('message').className = 'message' + (error ? ' error' : ''); }
+    async function api(path, options={}) { const response = await fetch(path, { headers: { 'Content-Type':'application/json' }, ...options }); const body = await response.json(); if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`); return body; }
+    function setView(view) { state.view = view; state.jobPage = 1; state.appPage = 1; document.querySelectorAll('nav button').forEach(button => button.classList.toggle('active', button.dataset.view === view)); ['dashboard','jobs','applications','history'].forEach(name => $(name + 'View').hidden = name !== view); render(); }
+    function renderCards() { const s = state.summary || {}; $('cards').innerHTML = [['All jobs',s.total],['Active',s.active],['Pending',s.pending],['Applied',s.applied],['Last run',s.last_run ? s.last_run.status : '—']].map(([label,value]) => `<div class="card"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join(''); }
+    function jobRows(items, compact=false) { if (!items.length) return '<div class="empty">No jobs match these filters.</div>'; return `<div class="table-wrap"><table><thead><tr><th>Job</th><th>Source</th><th>State</th><th>Application</th><th>Match</th><th>Received</th>${compact ? '' : '<th>Actions</th>'}</tr></thead><tbody>${items.map(job => `<tr><td class="job-cell"><a class="job-title" href="${esc(safeUrl(job.job_url))}" target="_blank" rel="noopener">${esc(job.title || 'Untitled role')}</a><small>${esc(job.company || 'Unknown company')}</small><br><small>${esc([job.city,job.state].filter(Boolean).join(', ') || (job.is_remote ? 'Remote' : 'Location not listed'))}</small></td><td>${esc(job.site || '—')}</td><td><span class="chip ${esc(job.status)}">${esc(job.status)}</span></td><td>${job.application_status ? `<span class="chip ${esc(job.application_status)}">${esc(job.application_status)}</span>${due(job) ? '<br><small class="muted">follow-up due</small>' : ''}` : '<span class="muted">Not applied</span>'}</td><td>${job.match_score == null ? '—' : `<strong>${esc(job.match_score)}</strong>`}<br><small>${esc(reasonsList(job).slice(0,2).join(', '))}</small></td><td>${esc(dateText(job.first_seen_at))}</td>${compact ? '' : `<td><div class="actions"><button data-action="details" data-id="${esc(job.job_id)}">Details</button>${job.application_status ? `<select data-action="status" data-id="${esc(job.job_id)}" aria-label="Application status"><option value="">Status…</option>${statuses.map(status => `<option value="${status}" ${status === job.application_status ? 'selected' : ''}>${status}</option>`).join('')}</select><button data-action="contact" data-id="${esc(job.job_id)}">Contacted</button>` : `<button data-action="apply" data-id="${esc(job.job_id)}">Mark applied</button>`}<button data-action="active" data-id="${esc(job.job_id)}">${job.is_active ? 'Deactivate' : 'Activate'}</button></div></td>`}</tr>`).join('')}</tbody></table></div>`; }
+    function paginate(items, page) { const pages = Math.max(1, Math.ceil(items.length / state.pageSize)); const current = Math.min(page, pages); return { page: current, pages, rows: items.slice((current-1)*state.pageSize, current*state.pageSize) }; }
+    function pager(target, page, pages, total) { $(target).innerHTML = `<span>${total ? `Page ${page} of ${pages} · ${total} item${total === 1 ? '' : 's'}` : 'No items'}</span><span class="buttons"><button data-page="prev" ${page <= 1 ? 'disabled' : ''}>Previous</button><button data-page="next" ${page >= pages ? 'disabled' : ''}>Next</button></span>`; }
+    function filteredJobs() { const query = $('jobSearch').value.trim().toLowerCase(); const jobState = $('jobState').value; const appState = $('applicationState').value; const sort = $('jobSort').value; const filtered = state.jobs.filter(job => (!query || `${job.title} ${job.company}`.toLowerCase().includes(query)) && (jobState === 'all' || job.status === jobState) && (appState === 'all' || (appState === 'none' ? !job.application_status : job.application_status === appState))); return filtered.sort((a,b) => sort === 'score' ? (Number(b.match_score||0)-Number(a.match_score||0)) : sort === 'company' ? String(a.company||'').localeCompare(String(b.company||'')) : String(b.first_seen_at||'').localeCompare(String(a.first_seen_at||''))); }
+    function renderJobs() { const page = paginate(filteredJobs(), state.jobPage); state.jobPage = page.page; $('jobsTable').innerHTML = jobRows(page.rows); pager('jobsPager', page.page, page.pages, filteredJobs().length); }
+    function renderApplications() { let items = state.jobs.filter(job => job.application_status); const filter = $('followupFilter').value; if (filter === 'due') items = items.filter(due); if (filter === 'active') items = items.filter(job => !['rejected','withdrawn','offer'].includes(job.application_status)); items.sort((a,b) => Number(due(b))-Number(due(a)) || String(b.applied_at||'').localeCompare(String(a.applied_at||''))); const page = paginate(items, state.appPage); state.appPage = page.page; $('applicationsTable').innerHTML = jobRows(page.rows); pager('applicationsPager', page.page, page.pages, items.length); }
+    function renderHistoryTable(items, type) { if (!items.length) return '<div class="empty">No history yet.</div>'; const headers = type === 'runs' ? ['Run','Started','Mode','Result','Counts'] : ['Trigger','Requested','Started','Completed','Result']; return `<div class="table-wrap"><table><thead><tr>${headers.map(header => `<th>${header}</th>`).join('')}</tr></thead><tbody>${items.map(item => type === 'runs' ? `<tr><td>#${esc(item.run_id)}</td><td>${esc(dateText(item.started_at))}</td><td>${esc(item.mode)}</td><td><span class="chip ${esc(item.status)} run-status">${esc(item.status)}</span>${item.error ? `<br><small class="muted">${esc(item.error)}</small>` : ''}</td><td>scraped ${esc(item.scraped_count)} · matched ${esc(item.matched_count)} · new ${esc(item.new_count)} · sent ${esc(item.sent_count)}</td></tr>` : `<tr><td>#${esc(item.trigger_id)}</td><td>${esc(dateText(item.requested_at))}</td><td>${esc(dateText(item.started_at))}</td><td>${esc(dateText(item.completed_at))}</td><td><span class="chip ${esc(item.status)} run-status">${esc(item.status)}</span>${item.error ? `<br><small class="muted">${esc(item.error)}</small>` : ''}</td></tr>`).join('')}</tbody></table></div>`; }
+    function renderDashboard() { renderCards(); $('recentJobs').innerHTML = jobRows(state.jobs.slice(0,5), true); const run = state.runs[0]; $('latestRun').innerHTML = run ? `<div class="detail-grid"><div><span class="muted">Status</span><strong>${esc(run.status)}</strong></div><div><span class="muted">Started</span><strong>${esc(dateText(run.started_at))}</strong></div><div><span class="muted">Scraped</span><strong>${esc(run.scraped_count)}</strong></div><div><span class="muted">Matched / sent</span><strong>${esc(run.matched_count)} / ${esc(run.sent_count)}</strong></div></div>` : '<div class="empty">No scraper run recorded yet.</div>'; }
+    function render() { if (state.view === 'dashboard') renderDashboard(); if (state.view === 'jobs') renderJobs(); if (state.view === 'applications') renderApplications(); if (state.view === 'history') { $('runsTable').innerHTML = renderHistoryTable(state.runs,'runs'); $('triggersTable').innerHTML = renderHistoryTable(state.triggers,'triggers'); } }
+    async function refresh() { try { const [summary, jobs, runs, triggers] = await Promise.all([api('/api/summary'),api('/api/jobs?limit=10000'),api('/api/runs'),api('/api/triggers')]); state.summary=summary; state.jobs=jobs; state.runs=runs; state.triggers=triggers; render(); message(`Updated ${new Date().toLocaleTimeString()}`); } catch (error) { message(error.message, true); } }
+    async function runScraper() { $('runButton').disabled=true; message('Scraper queued…'); try { const result=await api('/api/triggers',{method:'POST'}); message(`Scraper trigger #${result.trigger_id} queued`); setView('history'); await refresh(); } catch(error) { message(error.message,true); } finally { $('runButton').disabled=false; } }
+    async function updateJob(id, payload) { try { await api(`/api/jobs/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify(payload)}); message('Job updated'); await refresh(); } catch(error) { message(error.message,true); } }
+    function showDetails(job) { $('detailsTitle').textContent=job.title || 'Job details'; const reasons=reasonsList(job).map(reason=>`<span class="chip">${esc(reason)}</span>`).join(' '); $('detailsBody').innerHTML=`<div class="detail-grid"><div><span class="muted">Company</span><strong>${esc(job.company)}</strong></div><div><span class="muted">Source</span><strong>${esc(job.site)}</strong></div><div><span class="muted">Location</span><strong>${esc([job.city,job.state,job.country].filter(Boolean).join(', ') || (job.is_remote ? 'Remote' : 'Not listed'))}</strong></div><div><span class="muted">Salary</span><strong>${esc(moneyText(job) || 'Not listed')}</strong></div><div><span class="muted">Match score</span><strong>${esc(job.match_score ?? '—')}</strong></div><div><span class="muted">Application</span><strong>${esc(job.application_status || 'Not applied')}</strong></div></div><p>${reasons || '<span class="muted">No match reasons recorded.</span>'}</p><p class="description">${esc(job.description || 'No description was stored for this listing.')}</p><p><a href="${esc(safeUrl(job.job_url))}" target="_blank" rel="noopener">Open original listing</a></p>`; $('detailsDialog').showModal(); }
+    document.querySelectorAll('nav button').forEach(button=>button.addEventListener('click',()=>setView(button.dataset.view)));
+    $('runButton').addEventListener('click',runScraper); $('refreshButton').addEventListener('click',refresh); ['jobSearch','jobState','applicationState','jobSort'].forEach(id=>$(id).addEventListener('input',()=>{state.jobPage=1;renderJobs();})); $('followupFilter').addEventListener('change',()=>{state.appPage=1;renderApplications();}); $('closeDetails').addEventListener('click',()=> $('detailsDialog').close());
+    document.addEventListener('click', event => { const button=event.target.closest('[data-action]'); if(button){ const job=state.jobs.find(item=>item.job_id===button.dataset.id); if(!job)return; const action=button.dataset.action; if(action==='details')showDetails(job); if(action==='apply')updateJob(job.job_id,{application_status:'applied'}); if(action==='contact')updateJob(job.job_id,{contacted:true}); if(action==='active')updateJob(job.job_id,{active:!job.is_active}); } const pageButton=event.target.closest('[data-page]'); if(pageButton&&!pageButton.disabled){ if(state.view==='jobs')state.jobPage += pageButton.dataset.page==='next'?1:-1; else state.appPage += pageButton.dataset.page==='next'?1:-1; render(); } });
+    document.addEventListener('change', event => { const select=event.target.closest('select[data-action="status"]'); if(select&&select.value)updateJob(select.dataset.id,{application_status:select.value}); });
+    refresh(); setInterval(refresh,10000);
   </script>
 </body>
 </html>

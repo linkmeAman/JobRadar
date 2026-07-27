@@ -85,6 +85,33 @@ class WebStateTests(unittest.TestCase):
             )
             with urlopen(request) as response:
                 self.assertEqual(response.status, 200)
+            request = Request(
+                f"{base_url}/api/jobs/{job_id}",
+                data=b'{"application_status": "applied"}',
+                method="PATCH",
+                headers={"Content-Type": "application/json"},
+            )
+            with urlopen(request) as response:
+                self.assertEqual(response.status, 200)
+            request = Request(
+                f"{base_url}/api/jobs/{job_id}",
+                data=b'{"application_status": "screening"}',
+                method="PATCH",
+                headers={"Content-Type": "application/json"},
+            )
+            with urlopen(request) as response:
+                self.assertEqual(response.status, 200)
+            request = Request(
+                f"{base_url}/api/jobs/{job_id}",
+                data=b'{"contacted": true}',
+                method="PATCH",
+                headers={"Content-Type": "application/json"},
+            )
+            with urlopen(request) as response:
+                self.assertEqual(response.status, 200)
+            updated = server.jobs()[0]
+            self.assertEqual(updated["application_status"], "screening")
+            self.assertIsNotNone(updated["last_contact"])
             with urlopen(f"{base_url}/") as response:
                 self.assertIn(b"Run scraper", response.read())
         finally:

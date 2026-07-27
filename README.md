@@ -108,18 +108,29 @@ Send `/start` to the bot before the first run. `.env` is ignored by Git.
 
 ## Local UI
 
-The UI is a localhost-only, standard-library report page. It shows all
-received jobs, provider and match details, notification/application state,
-active or inactive controls, scrape history, and UI-trigger history.
+The UI is a localhost-only, standard-library report page. Use the four tabs to
+navigate between Dashboard, Jobs, Applications, and History:
+
+- **Dashboard** gives the current counts, five most recent jobs, and the latest
+  run summary.
+- **Jobs** supports title/company search, job-state and application-state
+  filters, sorting by newest/match/company, pagination, and a details dialog.
+  Each row can be activated/deactivated, marked applied, moved through
+  `screening`, `interview`, `offer`, `rejected`, or `withdrawn`, and marked as
+  contacted.
+- **Applications** shows tracked applications and highlights follow-ups due
+  after seven days without contact.
+- **History** shows scraper runs and every manual UI trigger, including errors.
 
 Start it from the repository root:
 
-\`\`\`bash
+```bash
 python -m job_radar.web.server
-\`\`\`
+```
 
 Open http://127.0.0.1:8765. The UI binds to localhost and has no
-authentication, so do not expose the port publicly.
+authentication, so do not expose the port publicly. Restart the web service
+after updating the code so the browser loads the new page.
 
 ## Resume automation and search generation
 
@@ -388,11 +399,11 @@ ExecStart=/mnt/d/Radar/.venv/bin/python -m job_radar.main
 
 The UI unit uses the same paths:
 
-\`\`\`ini
+```ini
 WorkingDirectory=/mnt/d/Radar
 EnvironmentFile=/mnt/d/Radar/.env
 ExecStart=/mnt/d/Radar/.venv/bin/python -m job_radar.web.server --host 127.0.0.1 --port 8765
-\`\`\`
+```
 
 Reload after editing the installed unit:
 

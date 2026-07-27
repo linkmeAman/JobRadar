@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .. import dedupe, main
+from .. import application_tracker, dedupe, main
 
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -179,6 +179,11 @@ def jobs(status: str | None = None, limit: int = 10000) -> list[dict[str, Any]]:
             "is_remote": payload.get("is_remote"),
             "match_score": payload.get("match_score"),
             "match_reasons": payload.get("match_reasons"),
+            "description": payload.get("description"),
+            "country": payload.get("country"),
+            "min_amount": payload.get("min_amount"),
+            "max_amount": payload.get("max_amount"),
+            "currency": payload.get("currency"),
         }
         if status and status != "all" and item["status"] != status:
             continue
@@ -376,10 +381,27 @@ class RequestHandler(BaseHTTPRequestHandler):
         job_id = unquote(self.path[len(prefix) :]).strip()
         try:
             body = self._body()
-            if not isinstance(body.get("active"), bool):
-                raise ValueError("active must be true or false")
-            updated = dedupe.set_active(job_id, body["active"])
-            self._json({"job_id": updated, "active": body["active"]})
+            response: dict[str, Any] = {"job_id": job_id}
+            if "active" in body:
+                if not isinstance(body["active"], bool):
+                    raise ValueError("active must be true or false")
+                response["job_id"] = dedupe.set_active(
+                    job_id, body["active"]
+                )
+                response["active"] = body["active"]
+            if "application_status" in body:
+                status = str(body["application_status"]).strip().lower()
+                if status == "applied":
+                    change = application_tracker.mark_applied(job_id)
+                else:
+                    change = application_tracker.set_status(job_id, status)
+                response["application_status"] = change.status
+            if body.get("contacted") is True:
+                application_tracker.mark_contacted(job_id)
+                response["contacted"] = True
+            if len(response) == 1:
+                raise ValueError("provide active, application_status, or contacted")
+            self._json(response)
         except ValueError as exc:
             self._error(str(exc))
         except sqlite3.Error as exc:

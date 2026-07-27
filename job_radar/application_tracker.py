@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS runtime_state (
 """
 
 
+def _database_path():
+    """Use the dedupe database path as the single source of truth."""
+    return dedupe.DATABASE_PATH
+
+
 @dataclass(frozen=True)
 class ApplicationChange:
     job_id: str
@@ -49,8 +54,9 @@ def _now() -> datetime:
 
 
 def _connect() -> sqlite3.Connection:
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DATABASE_PATH)
+    database_path = _database_path()
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database_path)
     connection.execute(_APPLICATIONS_SCHEMA)
     connection.execute(_RUNTIME_SCHEMA)
     return connection
@@ -149,7 +155,7 @@ def stale_applications(
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Return active applications with no contact inside the threshold."""
-    if silent_days <= 0 or not DATABASE_PATH.exists():
+    if silent_days <= 0 or not _database_path().exists():
         return []
     connection = _connect()
     try:
@@ -197,7 +203,7 @@ def stale_applications(
 
 
 def _runtime_value(key: str) -> str | None:
-    if not DATABASE_PATH.exists():
+    if not _database_path().exists():
         return None
     connection = _connect()
     try:
