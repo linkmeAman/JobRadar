@@ -15,6 +15,9 @@ import requests
 
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
 SEND_DELAY_SECONDS = 0.3
+MAX_SEND_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 1.0
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 _BOT_TOKEN_PATTERN = re.compile(r"^\d+:[A-Za-z0-9_-]+$")
 _CHAT_ID_PATTERN = re.compile(r"^-?\d+$")
 
@@ -110,6 +113,12 @@ def format_job_message(row: pd.Series) -> str:
 
     lines = [f"🆕 {title}", f"🏢 {company} | 📍 {location}"]
 
+    match_score = _value(row, "match_score")
+    match_reasons = _value(row, "match_reasons")
+    if _is_present(match_score):
+        reasons = f" · {match_reasons}" if _is_present(match_reasons) else ""
+        lines.append(f"🎯 Match score: {match_score}{reasons}")
+
     min_amount = _value(row, "min_amount")
     max_amount = _value(row, "max_amount")
     currency = _value(row, "currency")
@@ -122,6 +131,57 @@ def format_job_message(row: pd.Series) -> str:
     job_url = _display(_value(row, "job_url"), "")
     lines.append(f"🔗 {job_url}")
     return "\n".join(lines)
+
+
+def _retry_delay(response: requests.Response | None, attempt: int) -> float:
+    """Use Telegram's retry hint when available, otherwise exponential backoff."""
+    if response is not None:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after is None:
+            try:
+                retry_after = response.json().get("parameters", {}).get("retry_after")
+            except ValueError:
+                pass
+        if retry_after is not None:
+            try:
+                return max(0.0, float(retry_after))
+            except ValueError:
+                pass
+    return RETRY_BACKOFF_SECONDS * (2**attempt)
+
+
+def _send_message(url: str, chat_id: str, text: str) -> None:
+    """Send one message, retrying only temporary Telegram/network failures."""
+    for attempt in range(MAX_SEND_ATTEMPTS):
+        try:
+            response = requests.post(
+                url,
+                json={"chat_id": chat_id, "text": text},
+                timeout=20,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            response = exc.response
+            status = getattr(response, "status_code", None)
+            is_retryable = status is None or status in _RETRYABLE_STATUS_CODES
+            if is_retryable and attempt < MAX_SEND_ATTEMPTS - 1:
+                delay = _retry_delay(response, attempt)
+                print(
+                    f"telegram retry={attempt + 1}/{MAX_SEND_ATTEMPTS - 1} "
+                    f"status={status or 'network'} delay={delay:.1f}s"
+                )
+                time.sleep(delay)
+                continue
+
+            detail = f" (HTTP {status})" if status is not None else ""
+            raise RuntimeError(f"Telegram notification request failed{detail}") from None
+
+        try:
+            if response.json().get("ok") is not True:
+                raise RuntimeError("Telegram rejected the notification")
+        except ValueError:
+            raise RuntimeError("Telegram returned an invalid response") from None
+        return
 
 
 def send_all(
@@ -141,23 +201,7 @@ def send_all(
     url = TELEGRAM_API_URL.format(token=token)
     rows = list(df.iterrows())
     for position, (_, row) in enumerate(rows):
-        try:
-            response = requests.post(
-                url,
-                json={"chat_id": chat_id, "text": format_job_message(row)},
-                timeout=20,
-            )
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            status = getattr(exc.response, "status_code", None)
-            detail = f" (HTTP {status})" if status is not None else ""
-            raise RuntimeError(f"Telegram notification request failed{detail}") from None
-
-        try:
-            if response.json().get("ok") is not True:
-                raise RuntimeError("Telegram rejected the notification")
-        except ValueError:
-            raise RuntimeError("Telegram returned an invalid response") from None
+        _send_message(url, chat_id, format_job_message(row))
 
         sent += 1
         if on_sent is not None:

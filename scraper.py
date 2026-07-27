@@ -8,10 +8,18 @@ from typing import Any
 import pandas as pd
 from jobspy import scrape_jobs
 
+import scrape_state
+
+
+_CONFIG_ONLY_KEYS = {"name", "always_run"}
+
 
 def _validate_search(search: Mapping[str, Any]) -> None:
     """Check the JobSpy constraints that are easy to violate in YAML."""
-    site_names = {str(site).lower() for site in search.get("site_name", [])}
+    configured_sites = search.get("site_name", [])
+    if isinstance(configured_sites, str):
+        configured_sites = [configured_sites]
+    site_names = {str(site).lower() for site in configured_sites}
 
     if "indeed" not in site_names:
         return
@@ -29,38 +37,83 @@ def _validate_search(search: Mapping[str, Any]) -> None:
         )
 
 
-def run_all(searches: Sequence[Mapping[str, Any]]) -> pd.DataFrame:
+def run_all(
+    searches: Sequence[Mapping[str, Any]],
+    cooldown_minutes: int = 120,
+    max_cooldown_minutes: int = 720,
+) -> pd.DataFrame:
     """Scrape every configured search, retaining results from successful runs.
 
-    Failures are handled per search so a rate-limited source cannot stop the
-    remaining searches. A 429 is reported and not retried during this run.
+    Each configured site is called separately. Once a site returns 429 it is
+    skipped for the rest of the run, while all other sites continue normally.
     """
     results: list[pd.DataFrame] = []
+    blocked_sites: set[str] = set()
 
     for search in searches:
         name = str(search.get("name", "unnamed"))
-        try:
-            _validate_search(search)
-            params = {key: value for key, value in search.items() if key != "name"}
-            jobs = scrape_jobs(**params)
+        configured_sites = search.get("site_name", [])
+        if isinstance(configured_sites, str):
+            configured_sites = [configured_sites]
 
-            if jobs is None or jobs.empty:
-                print(f"search={name} scraped=0")
+        for configured_site in configured_sites:
+            site = str(configured_site).lower()
+            if site in blocked_sites:
+                print(f"search={name} site={site} skipped=blocked")
+                continue
+            cooldown_end = scrape_state.blocked_until(site)
+            if cooldown_end is not None:
+                print(
+                    f"search={name} site={site} skipped=cooldown "
+                    f"until={cooldown_end.isoformat()}"
+                )
                 continue
 
-            jobs = jobs.copy()
-            if "site" not in jobs.columns:
-                jobs["site"] = name
-            else:
-                jobs["site"] = jobs["site"].fillna(name)
+            site_search = dict(search)
+            site_search["site_name"] = [site]
+            try:
+                _validate_search(site_search)
+                params = {
+                    key: value
+                    for key, value in site_search.items()
+                    if key not in _CONFIG_ONLY_KEYS
+                }
+                jobs = scrape_jobs(**params)
 
-            results.append(jobs)
-            print(f"search={name} scraped={len(jobs)}")
-        except Exception as exc:  # JobSpy errors must not stop later searches.
-            message = str(exc)
-            if "429" in message:
-                print(f"search={name} blocked=429; not retrying this run")
-            else:
-                print(f"search={name} failed={type(exc).__name__}: {message}")
+                if jobs is None or jobs.empty:
+                    scrape_state.record_success(site, 0)
+                    print(f"search={name} site={site} scraped=0")
+                    continue
+
+                jobs = jobs.copy()
+                if "site" not in jobs.columns:
+                    jobs["site"] = site
+                else:
+                    jobs["site"] = jobs["site"].fillna(site)
+
+                results.append(jobs)
+                scrape_state.record_success(site, len(jobs))
+                print(f"search={name} site={site} scraped={len(jobs)}")
+            except Exception as exc:  # One provider must not stop other providers.
+                message = str(exc)
+                if "429" in message:
+                    blocked_sites.add(site)
+                    cooldown_end = scrape_state.record_blocked(
+                        site,
+                        base_cooldown_minutes=cooldown_minutes,
+                        max_cooldown_minutes=max_cooldown_minutes,
+                    )
+                    print(
+                        f"search={name} site={site} blocked=429; "
+                        f"cooldown_until={cooldown_end.isoformat()}"
+                    )
+                else:
+                    scrape_state.record_failure(
+                        site, f"{type(exc).__name__}: {message}"
+                    )
+                    print(
+                        f"search={name} site={site} "
+                        f"failed={type(exc).__name__}: {message}"
+                    )
 
     return pd.concat(results, ignore_index=True) if results else pd.DataFrame()

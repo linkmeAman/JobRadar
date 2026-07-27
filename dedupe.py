@@ -35,6 +35,8 @@ _NOTIFICATION_FIELDS = (
     "max_amount",
     "currency",
     "is_remote",
+    "match_score",
+    "match_reasons",
 )
 
 
@@ -127,8 +129,8 @@ def filter_new(df: pd.DataFrame) -> pd.DataFrame:
     return df.iloc[new_positions].copy()
 
 
-def pending_notifications() -> pd.DataFrame:
-    """Return every persisted job that has not received a Telegram alert."""
+def pending_notifications(limit: int | None = None) -> pd.DataFrame:
+    """Return pending alerts from strongest to weakest resume match."""
     if not DATABASE_PATH.exists():
         return pd.DataFrame()
 
@@ -151,7 +153,19 @@ def pending_notifications() -> pd.DataFrame:
         notification = json.loads(payload)
         notification["job_id"] = job_id
         notifications.append(notification)
-    return pd.DataFrame(notifications)
+    pending = pd.DataFrame(notifications)
+    if pending.empty:
+        return pending
+    if "match_score" in pending.columns:
+        pending["_sort_score"] = pd.to_numeric(
+            pending["match_score"], errors="coerce"
+        ).fillna(-1)
+        pending = pending.sort_values(
+            "_sort_score", ascending=False, kind="stable"
+        ).drop(columns="_sort_score")
+    if limit is not None:
+        pending = pending.head(limit)
+    return pending.reset_index(drop=True)
 
 
 def mark_notified(job_id: str) -> None:

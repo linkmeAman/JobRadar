@@ -1,5 +1,6 @@
 .venv/
 .env
 data/jobs.db
+data/resume_profile.json
 __pycache__/
 *.py[cod]

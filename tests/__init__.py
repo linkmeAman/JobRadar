@@ -1,0 +1,1 @@
+"""Job Radar automated tests."""

@@ -2,56 +2,92 @@ telegram:
   bot_token: ${TELEGRAM_BOT_TOKEN}
   chat_id: ${TELEGRAM_CHAT_ID}
 
+scraping:
+  # Two rotating role searches plus the always-run Indeed search are processed
+  # every 30 minutes. All four role searches are covered once per hour.
+  searches_per_run: 2
+  cooldown_minutes: 120
+  max_cooldown_minutes: 720
+
+resume:
+  # Replace either file when your resume changes. Their hashes are checked
+  # every run, so Job Radar automatically rebuilds its profile and ranking.
+  paths:
+    - "/mnt/d/Aman_Singh.pdf"
+    - "/mnt/d/Aman_Singh_CV.pdf"
+  cache_path: "data/resume_profile.json"
+
+matching:
+  minimum_score: 6
+  max_alerts_per_run: 10
+  maximum_required_years: 5
+  allowed_countries: [India]
+  seniority_penalty_terms: [senior, lead]
+  excluded_title_terms:
+    - intern
+    - internship
+    - frontend
+    - front-end
+    - wordpress
+    - sales
+    - support engineer
+    - technical support
+    - principal
+    - staff engineer
+    - engineering manager
+    - architect
+
 searches:
-  # LinkedIn + Google: hours_old is safe here, keeps results fresh and cuts
-  # how many pages get hit (LinkedIn rate limits hard after ~page 10 on one IP)
-  - name: backend_li_google
-    site_name: [linkedin, google]
-    search_term: "backend engineer"
-    google_search_term: "backend engineer jobs India remote"
-    location: "India"
-    is_remote: true
-    job_type: fulltime
-    hours_old: 24
-    results_wanted: 40
-
-  - name: go_developer_li_google
-    site_name: [linkedin, google]
-    search_term: "Go developer backend"
-    google_search_term: "Go backend developer jobs India remote"
-    location: "India"
-    is_remote: true
-    job_type: fulltime
-    hours_old: 24
-    results_wanted: 30
-
-  - name: python_backend_li_google
+  # Resume-aligned backend searches. A six-hour window gives rotated searches
+  # ample overlap while avoiding repeated 24-hour result pagination.
+  - name: python_fastapi_backend_li_google
     site_name: [linkedin, google]
     search_term: "Python backend engineer FastAPI"
-    google_search_term: "Python backend engineer jobs India remote"
+    google_search_term: "Python FastAPI backend engineer jobs India remote"
     location: "India"
     is_remote: true
     job_type: fulltime
-    hours_old: 24
-    results_wanted: 30
+    hours_old: 6
+    results_wanted: 20
 
-  - name: ai_llm_li_google
+  - name: golang_aws_backend_li_google
     site_name: [linkedin, google]
-    search_term: "LLM AI engineer backend"
-    google_search_term: "LLM AI engineer jobs India remote"
+    search_term: "Golang backend engineer AWS"
+    google_search_term: "Golang backend AWS engineer jobs India remote"
     location: "India"
     is_remote: true
     job_type: fulltime
-    hours_old: 24
-    results_wanted: 30
+    hours_old: 6
+    results_wanted: 20
+
+  - name: platform_devops_li_google
+    site_name: [linkedin, google]
+    search_term: "platform engineer Docker AWS Linux"
+    google_search_term: "platform engineer Docker AWS jobs India remote"
+    location: "India"
+    is_remote: true
+    job_type: fulltime
+    hours_old: 6
+    results_wanted: 20
+
+  - name: django_microservices_li_google
+    site_name: [linkedin, google]
+    search_term: "Django microservices backend engineer"
+    google_search_term: "Django microservices backend jobs India remote"
+    location: "India"
+    is_remote: true
+    job_type: fulltime
+    hours_old: 6
+    results_wanted: 20
 
   # Indeed: no hours_old (conflicts with job_type/is_remote), country_indeed
-  # is required, one boolean search_term covers all four role variants.
+  # is required. The boolean query reflects the resume's backend profile.
   - name: backend_indeed
+    always_run: true
     site_name: [indeed]
-    search_term: 'backend engineer (golang OR python OR "machine learning" OR llm) fulltime remote'
+    search_term: 'backend engineer (golang OR python OR FastAPI OR Django OR AWS) fulltime remote'
     location: "India"
     country_indeed: "India"
     is_remote: true
     job_type: fulltime
-    results_wanted: 60
+    results_wanted: 30

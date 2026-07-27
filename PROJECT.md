@@ -1,15 +1,23 @@
 # Job Radar — Automated Job Listing Scraper (JobSpy + Telegram)
 
+> **Current implementation note (July 2026):** The original baseline design
+> below has been extended for a 30-minute production schedule. The running
+> implementation now includes resume-PDF profile refresh, deterministic
+> relevance ranking, rotating search batches, per-provider scraping,
+> persistent exponential 429 cooldowns, pending-notification delivery flags,
+> Telegram retry/backoff, and automated tests. `README.md` and `config.yaml`
+> are the operational sources of truth.
+
 ## 1. Objective
 
 Scheduled script that scrapes new backend/Go/Python job postings (remote + India) using JobSpy, dedupes against previously seen listings, and pushes only new matches to a Telegram chat. Runs unattended as a systemd timer, same pattern as UEM's `uem-gateway` and `uem-topic-router` services.
 
-**Success criteria:** by end of today, a working service that scrapes every 6 hours and sends a Telegram message per new job with title, company, location, salary (if present), and apply link.
+**Success criteria:** a working service that runs every 30 minutes and sends a Telegram message per new resume-matched job with title, company, location, match score, salary (if present), and apply link.
 
 ## 2. Architecture
 
 ```
-systemd timer (every 6h)
+systemd timer (every 30 minutes)
         │
         ▼
    main.py (orchestrator)
@@ -29,15 +37,19 @@ No web server, no queue. Single process, run to completion, exit. State lives in
 job-radar/
 ├── main.py                # entrypoint: run configs -> dedupe -> notify
 ├── scraper.py             # JobSpy calls, one function per search config
+├── scrape_state.py        # persistent provider cooldown + query rotation
+├── resume_profile.py      # PDF hash, extraction, and cached skills profile
+├── matcher.py             # resume relevance, seniority, and country filters
 ├── dedupe.py              # SQLite read/write, job_id = hash(title+company+site)
 ├── notifier.py            # Telegram sendMessage wrapper
 ├── config.yaml            # search terms, locations, filters, telegram creds
 ├── requirements.txt
+├── tests/                 # offline unittest coverage for the full pipeline
 ├── data/
 │   └── jobs.db             # sqlite, gitignored
 ├── deploy/
 │   ├── job-radar.service  # systemd oneshot unit
-│   └── job-radar.timer    # systemd timer unit (OnCalendar=*-*-* 0/6:00:00)
+│   └── job-radar.timer    # systemd timer unit (OnCalendar=*-*-* *:00/30:00)
 ├── .env                    # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (gitignored)
 └── README.md
 ```
@@ -178,10 +190,10 @@ ExecStart=/opt/job-radar/.venv/bin/python main.py
 `job-radar.timer`:
 ```ini
 [Unit]
-Description=Run Job Radar every 6 hours
+Description=Run Job Radar every 30 minutes
 
 [Timer]
-OnCalendar=*-*-* 0/6:00:00
+OnCalendar=*-*-* *:00/30:00
 Persistent=true
 
 [Install]
@@ -211,7 +223,10 @@ WantedBy=timers.target
 ## 11. Future Enhancements (not today)
 
 - Swap flat Telegram messages for a daily digest option
-- Feed new listings through your NL2SQL/LangGraph stack for relevance scoring instead of keyword match alone
+- Add an optional semantic second-pass scorer after deterministic filtering
+- Learn ranking weights from manually accepted and rejected job matches
+- Migrate deduplication to use normalized job URLs when a stable URL exists
+- Send a health alert when every provider stays unavailable for several runs
 - Add Google Sheet as a secondary sink for historical tracking and filtering
 - Auto tailor resume bullets per listing using your existing achievement bank
 - Add proxy rotation if Indeed or LinkedIn start blocking your IP outright
@@ -219,6 +234,7 @@ WantedBy=timers.target
 ## 12. Ready to Paste Agent Prompt
 
 ```
+
 Build "Job Radar": a Python 3.10+ job scraping automation using the
 python-jobspy library (pip install -U python-jobspy, import as
 `from jobspy import scrape_jobs`). Follow the structure and config in
@@ -246,3 +262,27 @@ Requirements:
 Scope lock: build only what's in PROJECT.md. No web UI, no queue, no Google
 Sheet integration in this pass. Ask before adding anything not listed here.
 ```
+
+## 13. Implemented Production Extensions
+
+The current implementation adds the following backend-only capabilities while
+keeping the same single-process architecture:
+
+- **30-minute timer:** runs at minute `00` and `30` every hour.
+- **Resume refresh:** hashes both configured PDFs every run and rebuilds the
+  cached profile only when either file changes.
+- **Resume ranking:** scores title, description, skills, remote status,
+  seniority, required experience, and country eligibility.
+- **Search rotation:** runs two of four LinkedIn/Google role searches per
+  interval and covers all four within one hour; Indeed remains always-on.
+- **Provider isolation:** invokes LinkedIn, Google, and Indeed separately so
+  one provider cannot discard another provider's results.
+- **Persistent cooldown:** stores provider 429 state in SQLite and applies
+  exponential cooldowns across scheduled process restarts.
+- **Delivery state:** persists each Telegram payload and sets `notified_at`
+  only after Telegram accepts that message.
+- **Alert prioritisation:** sends at most 10 pending jobs per run, ordered by
+  resume match score; remaining alerts stay pending.
+- **Test coverage:** uses the standard-library `unittest` runner for dedupe,
+  matching, Telegram retry, resume parsing, scraper isolation, cooldown, and
+  search rotation behavior.
