@@ -102,3 +102,14 @@ class ScraperTests(unittest.TestCase):
 
         self.assertEqual(calls.count("linkedin"), 1)
         self.assertEqual(calls.count("google"), 2)
+
+    def test_dry_run_returns_report_without_writing_state(self) -> None:
+        with patch("scraper.scrape_jobs", return_value=pd.DataFrame()):
+            outcome = scraper.run_all(
+                self.searches[:1],
+                persist_state=False,
+                return_report=True,
+            )
+        self.assertIsInstance(outcome, scraper.ScrapeOutcome)
+        self.assertEqual(outcome.provider_status["google"]["status"], "success")
+        self.assertFalse(scrape_state.DATABASE_PATH.exists())

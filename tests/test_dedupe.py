@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import sqlite3
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -79,3 +81,157 @@ class DedupeTests(unittest.TestCase):
         self.assertEqual(len(pending), 1)
         self.assertEqual(pending.iloc[0]["title"], "Role B")
         self.assertEqual(pending.iloc[0]["match_score"], 12)
+
+    def test_normalized_url_ignores_tracking_parameters(self) -> None:
+        first = "https://Example.test/jobs/123/?utm_source=mail&ref=feed"
+        second = "https://example.test/jobs/123"
+        self.assertEqual(
+            dedupe.normalize_job_url(first),
+            dedupe.normalize_job_url(second),
+        )
+
+    def test_legacy_identity_migrates_without_resending(self) -> None:
+        job = {
+            "title": "Backend Engineer",
+            "company": "Acme",
+            "site": "linkedin",
+            "job_url": "https://example.test/jobs/123?utm_source=old",
+            "match_score": 10,
+        }
+        legacy_id = dedupe._job_id(
+            job["title"], job["company"], job["site"]
+        )
+        connection = sqlite3.connect(dedupe.DATABASE_PATH)
+        try:
+            connection.execute(
+                """
+                CREATE TABLE seen_jobs (
+                    job_id TEXT PRIMARY KEY, title TEXT, company TEXT, site TEXT,
+                    first_seen_at TIMESTAMP, notification_payload TEXT,
+                    notified_at TIMESTAMP
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO seen_jobs VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    legacy_id,
+                    job["title"],
+                    job["company"],
+                    job["site"],
+                    json.dumps({"job_url": job["job_url"]}),
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        current = pd.DataFrame(
+            [{**job, "job_url": "https://example.test/jobs/123"}]
+        )
+        self.assertTrue(dedupe.filter_new(current).empty)
+
+        connection = sqlite3.connect(dedupe.DATABASE_PATH)
+        try:
+            migrated = connection.execute(
+                "SELECT job_id FROM seen_jobs"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        self.assertEqual(migrated, dedupe.job_id_for(current.iloc[0]))
+        self.assertNotEqual(migrated, legacy_id)
+
+    def test_same_legacy_fields_with_different_urls_are_distinct(self) -> None:
+        jobs = pd.DataFrame(
+            [
+                {
+                    "title": "Backend Engineer",
+                    "company": "Acme",
+                    "site": "linkedin",
+                    "job_url": "https://example.test/jobs/one",
+                },
+                {
+                    "title": "Backend Engineer",
+                    "company": "Acme",
+                    "site": "linkedin",
+                    "job_url": "https://example.test/jobs/two",
+                },
+            ]
+        )
+        self.assertEqual(len(dedupe.filter_new(jobs)), 2)
+        self.assertTrue(dedupe.filter_new(jobs).empty)
+
+    def test_missing_url_falls_back_to_fields_after_url_identity(self) -> None:
+        with_url = pd.DataFrame(
+            [
+                {
+                    "title": "Backend Engineer",
+                    "company": "Acme",
+                    "site": "linkedin",
+                    "job_url": "https://example.test/jobs/one",
+                }
+            ]
+        )
+        dedupe.filter_new(with_url)
+        without_url = with_url.drop(columns="job_url")
+        self.assertTrue(dedupe.seen_status(without_url).iloc[0])
+        self.assertTrue(dedupe.filter_new(without_url).empty)
+
+    def test_pending_job_expiry_stops_retries(self) -> None:
+        jobs = pd.DataFrame(
+            [
+                {
+                    "title": "Old Role",
+                    "company": "Acme",
+                    "site": "google",
+                    "job_url": "https://example.test/old",
+                }
+            ]
+        )
+        dedupe.filter_new(jobs)
+        connection = sqlite3.connect(dedupe.DATABASE_PATH)
+        try:
+            connection.execute(
+                """
+                UPDATE seen_jobs
+                SET first_seen_at = datetime('now', '-8 days')
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(dedupe.expire_pending(7), 1)
+        self.assertTrue(dedupe.pending_notifications().empty)
+
+    def test_feedback_builds_conservative_scoring_adjustments(self) -> None:
+        jobs = pd.DataFrame(
+            [
+                {
+                    "title": "Python Backend Engineer",
+                    "company": "Acme",
+                    "site": "google",
+                    "job_url": "https://example.test/relevant",
+                    "match_reasons": "backend, python, fastapi",
+                },
+                {
+                    "title": "Backend Engineer",
+                    "company": "SpamCo",
+                    "site": "google",
+                    "job_url": "https://example.test/irrelevant",
+                    "match_reasons": "backend, python",
+                },
+            ]
+        )
+        dedupe.filter_new(jobs)
+        pending = dedupe.pending_notifications()
+        relevant = pending[pending["company"] == "Acme"].iloc[0]["job_id"]
+        irrelevant = pending[pending["company"] == "SpamCo"].iloc[0]["job_id"]
+        dedupe.record_feedback(relevant[:12], "applied")
+        dedupe.record_feedback(irrelevant[:12], "irrelevant")
+
+        adjustments = dedupe.feedback_adjustments()
+        self.assertIn("python", adjustments["preferred_skills"])
+        self.assertIn("fastapi", adjustments["preferred_skills"])
+        self.assertIn("spamco", adjustments["penalized_companies"])

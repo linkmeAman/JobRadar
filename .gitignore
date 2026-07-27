@@ -2,5 +2,6 @@
 .env
 data/jobs.db
 data/resume_profile.json
+data/job-radar.lock
 __pycache__/
 *.py[cod]

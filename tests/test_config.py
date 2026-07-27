@@ -49,3 +49,11 @@ class ConfigTests(unittest.TestCase):
         for search in rotating:
             self.assertLessEqual(search["hours_old"], 6)
             self.assertLessEqual(search["results_wanted"], 20)
+
+    def test_backend_hardening_defaults_are_safe(self) -> None:
+        self.assertTrue(self.config["dynamic_searches"]["enabled"])
+        self.assertEqual(self.config["matching"]["pending_expiry_days"], 7)
+        self.assertGreaterEqual(
+            self.config["monitoring"]["all_provider_failure_alert_runs"], 2
+        )
+        self.assertFalse(self.config["semantic"]["enabled"])

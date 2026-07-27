@@ -102,3 +102,55 @@ class MatcherTests(unittest.TestCase):
             allowed_countries=["India"],
         )
         self.assertTrue(matched.empty)
+
+    def test_explain_fields_cover_score_experience_country_and_exclusion(self) -> None:
+        jobs = pd.DataFrame(
+            [
+                {
+                    "title": "Backend Engineer",
+                    "description": "Requires 7 years of experience with Python",
+                    "country": "United States",
+                    "is_remote": False,
+                }
+            ]
+        )
+        evaluated = matcher.evaluate_jobs(
+            jobs,
+            {"skills": ["python"]},
+            minimum_score=6,
+            maximum_required_years=5,
+            allowed_countries=["India"],
+        )
+        row = evaluated.iloc[0]
+        self.assertEqual(row["required_experience"], 7)
+        self.assertFalse(row["country_eligible"])
+        self.assertEqual(row["exclusion_reason"], "requires 7 years")
+        self.assertFalse(row["matched"])
+
+    def test_feedback_adjusts_score_without_hard_filtering(self) -> None:
+        jobs = pd.DataFrame(
+            [
+                {
+                    "title": "Backend Engineer",
+                    "company": "Acme",
+                    "description": "Python and FastAPI",
+                }
+            ]
+        )
+        normal = matcher.evaluate_jobs(
+            jobs, {"skills": ["python", "fastapi"]}, minimum_score=1
+        )
+        adjusted = matcher.evaluate_jobs(
+            jobs,
+            {"skills": ["python", "fastapi"]},
+            minimum_score=1,
+            feedback={
+                "preferred_skills": ["python", "fastapi"],
+                "penalized_companies": ["acme"],
+            },
+        )
+        self.assertEqual(
+            adjusted.iloc[0]["match_score"],
+            normal.iloc[0]["match_score"] - 1,
+        )
+        self.assertIn("feedback", adjusted.iloc[0]["match_reasons"])

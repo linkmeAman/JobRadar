@@ -1,10 +1,11 @@
-"""Integration-style tests for the Job Radar orchestration flow."""
+"""Integration-style tests for Job Radar orchestration."""
 
 from __future__ import annotations
 
 import sys
 import types
 import unittest
+from contextlib import nullcontext
 from unittest.mock import patch
 
 import pandas as pd
@@ -15,55 +16,144 @@ jobspy_stub.scrape_jobs = lambda **_params: pd.DataFrame()
 sys.modules.setdefault("jobspy", jobspy_stub)
 
 import main
+import scraper
+
+
+def _config() -> dict:
+    return {
+        "resume": {"paths": ["resume.pdf"]},
+        "scraping": {
+            "searches_per_run": 2,
+            "cooldown_minutes": 120,
+            "max_cooldown_minutes": 720,
+        },
+        "matching": {
+            "minimum_score": 6,
+            "max_alerts_per_run": 10,
+            "pending_expiry_days": 7,
+            "maximum_required_years": 5,
+            "allowed_countries": ["India"],
+        },
+        "dynamic_searches": {"enabled": True},
+        "semantic": {"enabled": False},
+        "searches": [{"name": "one"}, {"name": "two"}],
+    }
 
 
 class MainTests(unittest.TestCase):
-    def test_main_caps_pending_alerts_after_matching_and_dedupe(self) -> None:
-        config = {
-            "resume": {"paths": ["resume.pdf"]},
-            "scraping": {
-                "searches_per_run": 2,
-                "cooldown_minutes": 120,
-                "max_cooldown_minutes": 720,
-            },
-            "matching": {
-                "minimum_score": 6,
-                "max_alerts_per_run": 10,
-                "maximum_required_years": 5,
-                "allowed_countries": ["India"],
-            },
-            "searches": [{"name": "one"}, {"name": "two"}],
-        }
+    def test_normal_run_caps_pending_alerts_and_records_history(self) -> None:
+        config = _config()
         scraped = pd.DataFrame([{"title": "Backend Engineer"}])
-        matched = scraped.assign(match_score=10, match_reasons="backend")
+        evaluated = scraped.assign(
+            match_score=10,
+            match_reasons="backend",
+            exclusion_reason=None,
+            matched=True,
+        )
         pending = pd.DataFrame(
             [
                 {"job_id": f"job-{index}", "title": f"Role {index}"}
                 for index in range(12)
             ]
         )
+        outcome = scraper.ScrapeOutcome(
+            scraped, {"google": {"status": "success", "results": 1}}
+        )
 
         with patch("main.load_config", return_value=config), patch(
+            "main.run_lock.single_instance", return_value=nullcontext()
+        ), patch(
             "main.notifier.validate_delivery_target"
         ), patch(
             "main.resume_profile.load_or_refresh",
-            return_value={"skills": ["python"]},
+            return_value={"skills": ["python"], "roles": ["backend engineer"]},
         ), patch(
-            "main.scrape_state.select_searches",
-            return_value=config["searches"],
+            "main._selected_searches", return_value=config["searches"]
         ), patch(
-            "main.scraper.run_all", return_value=scraped
+            "main.scrape_state.start_run", return_value=7
         ), patch(
-            "main.matcher.filter_and_rank", return_value=matched
+            "main.scraper.run_all", return_value=outcome
         ), patch(
-            "main.dedupe.filter_new", return_value=matched
+            "main.dedupe.feedback_adjustments", return_value={}
+        ), patch(
+            "main.matcher.evaluate_jobs", return_value=evaluated
+        ), patch(
+            "main.matcher.select_matches", return_value=evaluated
+        ), patch(
+            "main.dedupe.filter_new", return_value=evaluated
+        ), patch(
+            "main.dedupe.expire_pending", return_value=0
         ), patch(
             "main.dedupe.pending_notifications", return_value=pending
         ), patch(
             "main.notifier.send_all", return_value=10
-        ) as send_all:
-            main.main()
+        ) as send_all, patch(
+            "main.scrape_state.complete_run"
+        ) as complete, patch(
+            "main._maybe_send_health_alert"
+        ):
+            main.main([])
 
         queued = send_all.call_args.args[0]
         self.assertEqual(len(queued), 10)
         self.assertEqual(queued.iloc[0]["job_id"], "job-0")
+        self.assertEqual(complete.call_args.kwargs["sent_count"], 10)
+
+    def test_dry_run_does_not_validate_send_or_write_sqlite(self) -> None:
+        config = _config()
+        scraped = pd.DataFrame(
+            [
+                {
+                    "title": "Backend Engineer",
+                    "company": "Acme",
+                    "site": "google",
+                }
+            ]
+        )
+        outcome = scraper.ScrapeOutcome(
+            scraped, {"google": {"status": "success", "results": 1}}
+        )
+        evaluated = scraped.assign(
+            required_experience=None,
+            country_eligible=True,
+            country_eligibility="country not listed",
+            exclusion_reason=None,
+            match_score=9,
+            match_reasons="backend",
+            matched=True,
+        )
+
+        with patch("main.load_config", return_value=config), patch(
+            "main.run_lock.single_instance", return_value=nullcontext()
+        ), patch(
+            "main.notifier.validate_delivery_target"
+        ) as validate, patch(
+            "main.resume_profile.load_or_refresh",
+            return_value={"skills": ["python"], "roles": ["backend engineer"]},
+        ), patch(
+            "main._selected_searches", return_value=config["searches"]
+        ), patch(
+            "main.scraper.run_all", return_value=outcome
+        ) as run_all, patch(
+            "main.dedupe.feedback_adjustments", return_value={}
+        ), patch(
+            "main.matcher.evaluate_jobs", return_value=evaluated
+        ), patch(
+            "main.matcher.select_matches", return_value=evaluated
+        ), patch(
+            "main.dedupe.seen_status",
+            return_value=pd.Series([False]),
+        ), patch(
+            "main.scrape_state.start_run"
+        ) as start_run, patch(
+            "main.dedupe.filter_new"
+        ) as filter_new, patch(
+            "main.notifier.send_all"
+        ) as send_all:
+            main.main(["--dry-run"])
+
+        validate.assert_not_called()
+        start_run.assert_not_called()
+        filter_new.assert_not_called()
+        send_all.assert_not_called()
+        self.assertFalse(run_all.call_args.kwargs["persist_state"])

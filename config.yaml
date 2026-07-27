@@ -9,6 +9,18 @@ scraping:
   cooldown_minutes: 120
   max_cooldown_minutes: 720
 
+dynamic_searches:
+  # Rebuilt from the latest resume roles and strongest skills each run.
+  # The static non-always searches below remain as a disabled-mode fallback.
+  enabled: true
+  role_limit: 4
+  site_name: [linkedin, google]
+  location: "India"
+  is_remote: true
+  job_type: fulltime
+  hours_old: 6
+  results_wanted: 20
+
 resume:
   # Replace either file when your resume changes. Their hashes are checked
   # every run, so Job Radar automatically rebuilds its profile and ranking.
@@ -20,6 +32,7 @@ resume:
 matching:
   minimum_score: 6
   max_alerts_per_run: 10
+  pending_expiry_days: 7
   maximum_required_years: 5
   allowed_countries: [India]
   seniority_penalty_terms: [senior, lead]
@@ -36,6 +49,23 @@ matching:
     - staff engineer
     - engineering manager
     - architect
+
+monitoring:
+  # Alert once per outage streak, after all selected providers have failed
+  # this many consecutive scheduled runs.
+  all_provider_failure_alert_runs: 3
+
+semantic:
+  # Optional second-stage scoring for borderline jobs. When enabled, only a
+  # compact roles/skills profile and limited job text are sent to OpenAI.
+  enabled: false
+  model: text-embedding-3-small
+  borderline_min_score: 4
+  borderline_max_score: 8
+  minimum_similarity: 0.45
+  maximum_bonus: 4
+  max_jobs_per_run: 10
+  fail_open: true
 
 searches:
   # Resume-aligned backend searches. A six-hour window gives rotated searches

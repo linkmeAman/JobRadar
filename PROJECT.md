@@ -2,9 +2,10 @@
 
 > **Current implementation note (July 2026):** The original baseline design
 > below has been extended for a 30-minute production schedule. The running
-> implementation now includes resume-PDF profile refresh, deterministic
-> relevance ranking, rotating search batches, per-provider scraping,
-> persistent exponential 429 cooldowns, pending-notification delivery flags,
+> implementation now includes resume-PDF profile refresh, dynamic queries,
+> explain-only dry runs, deterministic relevance ranking, optional semantic
+> scoring, URL-aware dedupe migration, feedback labels, run history, health
+> alerts, single-instance locking, pending expiry, provider cooldowns,
 > Telegram retry/backoff, and automated tests. `README.md` and `config.yaml`
 > are the operational sources of truth.
 
@@ -40,7 +41,10 @@ job-radar/
 ├── scrape_state.py        # persistent provider cooldown + query rotation
 ├── resume_profile.py      # PDF hash, extraction, and cached skills profile
 ├── matcher.py             # resume relevance, seniority, and country filters
-├── dedupe.py              # SQLite read/write, job_id = hash(title+company+site)
+├── search_generator.py    # rotating queries from current resume roles/skills
+├── semantic.py            # optional embedding score for borderline jobs
+├── run_lock.py            # manual/systemd single-instance protection
+├── dedupe.py              # URL-aware SQLite dedupe, delivery, and feedback
 ├── notifier.py            # Telegram sendMessage wrapper
 ├── config.yaml            # search terms, locations, filters, telegram creds
 ├── requirements.txt
@@ -223,10 +227,6 @@ WantedBy=timers.target
 ## 11. Future Enhancements (not today)
 
 - Swap flat Telegram messages for a daily digest option
-- Add an optional semantic second-pass scorer after deterministic filtering
-- Learn ranking weights from manually accepted and rejected job matches
-- Migrate deduplication to use normalized job URLs when a stable URL exists
-- Send a health alert when every provider stays unavailable for several runs
 - Add Google Sheet as a secondary sink for historical tracking and filtering
 - Auto tailor resume bullets per listing using your existing achievement bank
 - Add proxy rotation if Indeed or LinkedIn start blocking your IP outright
@@ -286,3 +286,29 @@ keeping the same single-process architecture:
 - **Test coverage:** uses the standard-library `unittest` runner for dedupe,
   matching, Telegram retry, resume parsing, scraper isolation, cooldown, and
   search rotation behavior.
+
+## 14. Backend Hardening Release
+
+The current release also implements:
+
+- **Read-only explain mode:** `python main.py --dry-run` performs scraping and
+  matching without Telegram or SQLite mutations, and prints score reasons,
+  exclusion, detected experience, country eligibility, and seen status.
+- **Dynamic resume searches:** rotating LinkedIn/Google searches and the
+  always-run Indeed term are rebuilt from current resume roles and skills.
+- **Run audit trail:** `scrape_runs` stores timing, selected searches,
+  provider-level results/errors/cooldowns, matching counts, delivery counts,
+  and terminal status.
+- **Provider outage alert:** Telegram receives one warning only after every
+  selected provider has failed for the configured number of consecutive runs.
+- **URL-aware identity:** normalized job URL is preferred, with the original
+  title/company/site hash retained as a fallback and lazily migrated without
+  resending existing jobs.
+- **Pending expiry:** unnotified listings stop retrying after the configured
+  age, seven days by default.
+- **Process lock:** the scheduled service and a manual `python main.py` cannot
+  run concurrently.
+- **Relevance feedback:** short Telegram job IDs accept `relevant`,
+  `irrelevant`, and `applied` labels that conservatively adjust future scores.
+- **Optional semantic scoring:** disabled by default; when enabled, OpenAI
+  embeddings add a bounded bonus only to deterministic borderline matches.

@@ -79,3 +79,18 @@ class NotifierTests(unittest.TestCase):
             notifier.send_all(self.job)
 
         self.assertEqual(post.call_count, 1)
+
+    def test_job_message_includes_feedback_identifier(self) -> None:
+        message = notifier.format_job_message(self.job.iloc[0])
+        self.assertIn("🆔 job-1", message)
+
+    def test_health_alert_uses_same_bot_api(self) -> None:
+        with patch(
+            "notifier.requests.post",
+            return_value=FakeResponse(200, {"ok": True}),
+        ) as post:
+            notifier.send_health_alert("All providers failed")
+        self.assertIn(
+            "Job Radar health alert",
+            post.call_args.kwargs["json"]["text"],
+        )

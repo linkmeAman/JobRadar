@@ -130,6 +130,9 @@ def format_job_message(row: pd.Series) -> str:
 
     job_url = _display(_value(row, "job_url"), "")
     lines.append(f"🔗 {job_url}")
+    job_id = _value(row, "job_id")
+    if _is_present(job_id):
+        lines.append(f"🆔 {str(job_id)[:12]}")
     return "\n".join(lines)
 
 
@@ -210,3 +213,13 @@ def send_all(
             time.sleep(SEND_DELAY_SECONDS)
 
     return sent
+
+
+def send_health_alert(message: str) -> None:
+    """Send one operational alert through the configured Telegram chat."""
+    token, chat_id = get_credentials()
+    _send_message(
+        TELEGRAM_API_URL.format(token=token),
+        chat_id,
+        f"⚠️ Job Radar health alert\n{message}",
+    )
