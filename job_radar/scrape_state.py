@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS provider_state (
     provider TEXT PRIMARY KEY,
     blocked_until TEXT,
     consecutive_429 INTEGER NOT NULL DEFAULT 0,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    failure_alert_sent INTEGER NOT NULL DEFAULT 0,
     last_status TEXT,
     last_result_count INTEGER,
     updated_at TEXT NOT NULL
@@ -63,6 +65,23 @@ def _connect() -> sqlite3.Connection:
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DATABASE_PATH)
     connection.execute(_PROVIDER_SCHEMA)
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(provider_state)")
+    }
+    migrations = {
+        "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
+        "failure_alert_sent": "INTEGER NOT NULL DEFAULT 0",
+    }
+    migrated = False
+    for name, definition in migrations.items():
+        if name not in columns:
+            connection.execute(
+                f"ALTER TABLE provider_state ADD COLUMN {name} {definition}"
+            )
+            migrated = True
+    if migrated:
+        connection.commit()
     connection.execute(_RUNTIME_SCHEMA)
     connection.execute(_RUNS_SCHEMA)
     return connection
@@ -117,10 +136,12 @@ def record_blocked(
     connection = _connect()
     try:
         row = connection.execute(
-            "SELECT consecutive_429 FROM provider_state WHERE provider = ?",
+            """SELECT consecutive_429, consecutive_failures
+               FROM provider_state WHERE provider = ?""",
             (provider,),
         ).fetchone()
         consecutive = (int(row[0]) if row else 0) + 1
+        failures = (int(row[1]) if row else 0) + 1
         cooldown_minutes = min(
             base_cooldown_minutes * (2 ** (consecutive - 1)),
             max_cooldown_minutes,
@@ -130,12 +151,14 @@ def record_blocked(
             connection.execute(
                 """
                 INSERT INTO provider_state
-                    (provider, blocked_until, consecutive_429, last_status,
-                     last_result_count, updated_at)
-                VALUES (?, ?, ?, 'blocked_429', NULL, ?)
+                    (provider, blocked_until, consecutive_429,
+                     consecutive_failures, last_status, last_result_count,
+                     updated_at)
+                VALUES (?, ?, ?, ?, 'blocked_429', NULL, ?)
                 ON CONFLICT(provider) DO UPDATE SET
                     blocked_until = excluded.blocked_until,
                     consecutive_429 = excluded.consecutive_429,
+                    consecutive_failures = excluded.consecutive_failures,
                     last_status = excluded.last_status,
                     last_result_count = NULL,
                     updated_at = excluded.updated_at
@@ -144,6 +167,7 @@ def record_blocked(
                     provider,
                     cooldown_end.isoformat(),
                     consecutive,
+                    failures,
                     current.isoformat(),
                 ),
             )
@@ -163,12 +187,15 @@ def record_success(
             connection.execute(
                 """
                 INSERT INTO provider_state
-                    (provider, blocked_until, consecutive_429, last_status,
+                    (provider, blocked_until, consecutive_429,
+                     consecutive_failures, failure_alert_sent, last_status,
                      last_result_count, updated_at)
-                VALUES (?, NULL, 0, 'success', ?, ?)
+                VALUES (?, NULL, 0, 0, 0, 'success', ?, ?)
                 ON CONFLICT(provider) DO UPDATE SET
                     blocked_until = NULL,
                     consecutive_429 = 0,
+                    consecutive_failures = 0,
+                    failure_alert_sent = 0,
                     last_status = 'success',
                     last_result_count = excluded.last_result_count,
                     updated_at = excluded.updated_at
@@ -184,19 +211,138 @@ def record_failure(provider: str, status: str, now: datetime | None = None) -> N
     current = now or _now()
     connection = _connect()
     try:
+        row = connection.execute(
+            "SELECT consecutive_failures FROM provider_state WHERE provider = ?",
+            (provider,),
+        ).fetchone()
+        failures = (int(row[0]) if row else 0) + 1
         with connection:
             connection.execute(
                 """
                 INSERT INTO provider_state
-                    (provider, blocked_until, consecutive_429, last_status,
-                     last_result_count, updated_at)
-                VALUES (?, NULL, 0, ?, NULL, ?)
+                    (provider, blocked_until, consecutive_429,
+                     consecutive_failures, last_status, last_result_count,
+                     updated_at)
+                VALUES (?, NULL, 0, ?, ?, NULL, ?)
                 ON CONFLICT(provider) DO UPDATE SET
+                    consecutive_failures = excluded.consecutive_failures,
                     last_status = excluded.last_status,
                     last_result_count = NULL,
                     updated_at = excluded.updated_at
                 """,
-                (provider, status[:200], current.isoformat()),
+                (provider, failures, status[:200], current.isoformat()),
+            )
+    finally:
+        connection.close()
+
+
+def record_cooldown(provider: str, now: datetime | None = None) -> None:
+    """Count a provider that remained unavailable during this run."""
+    current = now or _now()
+    connection = _connect()
+    try:
+        row = connection.execute(
+            "SELECT consecutive_failures FROM provider_state WHERE provider = ?",
+            (provider,),
+        ).fetchone()
+        failures = (int(row[0]) if row else 0) + 1
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO provider_state
+                    (provider, blocked_until, consecutive_429,
+                     consecutive_failures, last_status, last_result_count,
+                     updated_at)
+                VALUES (?, NULL, 0, ?, 'cooldown', NULL, ?)
+                ON CONFLICT(provider) DO UPDATE SET
+                    consecutive_failures = excluded.consecutive_failures,
+                    last_status = 'cooldown',
+                    last_result_count = NULL,
+                    updated_at = excluded.updated_at
+                """,
+                (provider, failures, current.isoformat()),
+            )
+    finally:
+        connection.close()
+
+
+def degraded_providers(
+    provider_status: Mapping[str, Mapping[str, Any]],
+    threshold: int,
+) -> list[dict[str, Any]]:
+    """Return providers over a consecutive-run failure threshold."""
+    if threshold <= 0 or not provider_status:
+        return []
+
+    connection = _connect()
+    try:
+        run_rows = connection.execute(
+            """SELECT provider_status FROM scrape_runs
+               WHERE mode = 'normal' AND status IN ('completed', 'failed')
+               ORDER BY run_id DESC"""
+        ).fetchall()
+        degraded: list[dict[str, Any]] = []
+        for provider, status in provider_status.items():
+            if status.get("status") == "scheduled_skip":
+                continue
+            current_status = str(status.get("status", "unknown"))
+            if current_status not in {
+                "failure",
+                "blocked_429",
+                "cooldown",
+                "skipped_blocked",
+            }:
+                continue
+            failures = 0
+            for (serialized,) in run_rows:
+                try:
+                    history = json.loads(serialized or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    break
+                history_status = history.get(provider, {}).get("status")
+                if history_status == "scheduled_skip":
+                    break
+                if history_status not in {
+                    "failure",
+                    "blocked_429",
+                    "cooldown",
+                    "skipped_blocked",
+                }:
+                    break
+                failures += 1
+            row = connection.execute(
+                """SELECT consecutive_failures, failure_alert_sent
+                   FROM provider_state WHERE provider = ?""",
+                (provider,),
+            ).fetchone()
+            if not row:
+                continue
+            alert_sent = bool(row[1])
+            if failures >= threshold and not alert_sent:
+                degraded.append(
+                    {
+                        "provider": provider,
+                        "failures": failures,
+                        "status": status.get("status", "unknown"),
+                        "error": status.get("error")
+                        or (status.get("errors") or [None])[-1],
+                    }
+                )
+        return degraded
+    finally:
+        connection.close()
+
+
+def mark_provider_alert_sent(providers: Sequence[str]) -> None:
+    """Suppress duplicate alerts until each provider succeeds again."""
+    if not providers:
+        return
+    connection = _connect()
+    try:
+        with connection:
+            connection.executemany(
+                "UPDATE provider_state SET failure_alert_sent = 1 WHERE provider = ?",
+                [(provider,) for provider in providers],
             )
     finally:
         connection.close()

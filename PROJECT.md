@@ -41,6 +41,7 @@ main.py                 orchestration and CLI
 scraper.py              isolated JobSpy provider calls
 sources/                HN, Cutshort, and Hirist adapters
 scrape_state.py         provider cooldowns, rotation, and run history
+backup.py               consistent SQLite backup and retention CLI
 resume_profile.py       PDF hashing, extraction, and profile cache
 search_generator.py     resume-derived search generation
 matcher.py              deterministic relevance and eligibility rules
@@ -51,9 +52,10 @@ notifier.py             Telegram Bot API transport and formatting
 run_lock.py             single-instance protection
 web/                    localhost report UI and trigger API
 config.yaml             runtime settings and search definitions
-deploy/                 systemd service and timer
+deploy/                 scraper, UI, and nightly backup units/timers
 tests/                  offline unit and integration tests
 data/jobs.db            SQLite state, excluded from Git
+data/backups/           timestamped SQLite backups, excluded from Git
 ```
 
 ## Job sources
@@ -134,6 +136,8 @@ are excluded.
 - HTTP 429 responses create persisted exponential cooldowns.
 - A successful provider prevents an all-provider failure classification.
 - A Telegram health alert is sent once per sustained outage streak.
+- A separate Telegram alert is sent once per provider failure streak, even
+  while other providers continue returning jobs.
 - Application command and reminder errors do not stop scraping.
 - Telegram delivery is marked complete only after API acceptance.
 
@@ -159,6 +163,11 @@ the existing follow-up reminders. The Run scraper button queues a background
 run with mode `manual_ui`, and every trigger is recorded in
 `web_trigger_history`. It has no public authentication layer and must remain
 localhost-only.
+
+The nightly backup unit writes timestamped SQLite copies to `data/backups` and
+retains the configured number of days. Monitoring tracks each provider's
+failure streak separately from the all-provider outage streak, so a provider
+can trigger a Telegram degradation alert even while other sources succeed.
 
 ## Scheduling
 

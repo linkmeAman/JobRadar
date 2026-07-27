@@ -290,6 +290,7 @@ def run(
                 **counts,
             )
             _maybe_send_health_alert(config, run_id, all_failed)
+            _maybe_send_provider_alert(config, provider_status)
         except Exception as exc:
             if run_id is not None:
                 scrape_state.complete_run(
@@ -339,6 +340,30 @@ def _maybe_send_health_alert(
         logging.error("health_alert=failed error=%s", exc)
         return
     scrape_state.mark_health_alert_sent(run_id)
+
+
+def _maybe_send_provider_alert(
+    config: dict[str, Any], provider_status: dict[str, Any]
+) -> None:
+    threshold = int(
+        config.get("monitoring", {}).get("provider_failure_alert_runs", 3)
+    )
+    degraded = scrape_state.degraded_providers(provider_status, threshold)
+    if not degraded:
+        return
+    details = "; ".join(
+        f"{item['provider']} ({item['failures']} runs, {item['status']})"
+        + (f": {item['error']}" if item.get("error") else "")
+        for item in degraded
+    )
+    try:
+        notifier.send_health_alert(f"Provider degradation: {details}")
+    except RuntimeError as exc:
+        logging.error("provider_health_alert=failed error=%s", exc)
+        return
+    scrape_state.mark_provider_alert_sent(
+        [str(item["provider"]) for item in degraded]
+    )
 
 
 def _parser() -> argparse.ArgumentParser:

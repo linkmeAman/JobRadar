@@ -42,6 +42,7 @@ Radar/
 │   ├── application_tracker.py Telegram commands and reminders
 │   ├── notifier.py            Telegram Bot API transport
 │   ├── scrape_state.py        cooldowns, rotation, and run history
+│   ├── backup.py               SQLite backup and retention CLI
 │   └── semantic.py             optional borderline scoring
 ├── tests/                     offline test suite and fixtures
 ├── deploy/                    systemd service and timer
@@ -300,7 +301,9 @@ SQLite at `data/jobs.db` contains:
 When every selected provider is unavailable for
 `monitoring.all_provider_failure_alert_runs` consecutive normal runs, Job Radar
 sends one Telegram health alert for that outage streak. It does not alert for a
-single provider failure, and a successful provider resets the streak.
+single provider failure, and a successful provider resets the streak. A
+separate alert is sent once when an individual provider reaches
+`monitoring.provider_failure_alert_runs`, even if other providers succeed.
 
 Inspect recent history:
 
@@ -352,6 +355,10 @@ The configured model receives a compact resume profile and limited job text.
 - `matching.allowed_countries`: allowed non-remote job countries.
 - `matching.excluded_title_terms`: immediate title exclusions.
 - `monitoring.all_provider_failure_alert_runs`: outage alert threshold.
+- `monitoring.provider_failure_alert_runs`: per-provider degradation threshold.
+- `backups.enabled`: enable or disable backup behavior.
+- `backups.path`: timestamped SQLite backup directory.
+- `backups.retention_days`: number of days of backup history to retain.
 - `semantic.*`: optional borderline embedding settings.
 
 ## Tests
@@ -389,7 +396,8 @@ sudo systemctl enable --now job-radar-web.service
 sudo systemctl start job-radar.service
 ```
 
-If the project is at `/mnt/d/Radar`, change all three installed service paths:
+If the project is at `/mnt/d/Radar`, change the installed scraper, UI, and
+backup service paths:
 
 ```ini
 WorkingDirectory=/mnt/d/Radar
@@ -403,6 +411,30 @@ The UI unit uses the same paths:
 WorkingDirectory=/mnt/d/Radar
 EnvironmentFile=/mnt/d/Radar/.env
 ExecStart=/mnt/d/Radar/.venv/bin/python -m job_radar.web.server --host 127.0.0.1 --port 8765
+```
+
+The backup unit uses the same project path:
+
+```ini
+WorkingDirectory=/mnt/d/Radar
+ExecStart=/mnt/d/Radar/.venv/bin/python -m job_radar.backup --destination /mnt/d/Radar/data/backups --retention-days 14
+```
+
+Install the nightly database backup timer too:
+
+```bash
+sudo cp deploy/job-radar-backup.service /etc/systemd/system/
+sudo cp deploy/job-radar-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now job-radar-backup.timer
+systemctl list-timers job-radar-backup.timer
+```
+
+The backup keeps timestamped copies under `data/backups` and removes copies
+older than `backups.retention_days` (14 by default). Test it manually with:
+
+```bash
+python -m job_radar.backup
 ```
 
 Reload after editing the installed unit:
@@ -428,6 +460,8 @@ journalctl -u job-radar-web.service -n 100 --no-pager
 - Telegram 403: wrong chat ID, bot blocked, or `/start` not sent.
 - `application_commands=failed`: confirm the bot does not have a webhook;
   Telegram does not allow webhook delivery and `getUpdates` polling together.
+- `provider_health_alert=failed`: verify Telegram credentials; provider alerts
+  are retried on a later run and are not marked sent until delivery succeeds.
 - `OPENAI_API_KEY must be set`: semantic scoring was enabled without a key.
 
 Keep `.env`, `data/jobs.db`, `data/resume_profile.json`, and resume PDFs private.

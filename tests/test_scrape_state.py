@@ -115,3 +115,64 @@ class ScrapeStateTests(unittest.TestCase):
         self.assertFalse(scrape_state.current_failure_streak_alerted())
         scrape_state.mark_health_alert_sent(second)
         self.assertTrue(scrape_state.current_failure_streak_alerted())
+
+    def test_provider_degradation_alert_is_once_per_failure_streak(self) -> None:
+        status = {"linkedin": {"status": "failure", "error": "429"}}
+        for _ in range(2):
+            run_id = scrape_state.start_run([{"name": "linkedin"}])
+            scrape_state.record_failure("linkedin", "429")
+            scrape_state.complete_run(
+                run_id,
+                started_at=datetime(2026, 7, 27, tzinfo=timezone.utc),
+                provider_status=status,
+                scraped_count=0,
+                matched_count=0,
+                new_count=0,
+                pending_count=0,
+                queued_count=0,
+                deferred_count=0,
+                expired_count=0,
+                sent_count=0,
+                all_providers_failed=True,
+            )
+        self.assertEqual(scrape_state.degraded_providers(status, 3), [])
+
+        run_id = scrape_state.start_run([{"name": "linkedin"}])
+        scrape_state.record_failure("linkedin", "429")
+        scrape_state.complete_run(
+            run_id,
+            started_at=datetime(2026, 7, 27, tzinfo=timezone.utc),
+            provider_status=status,
+            scraped_count=0,
+            matched_count=0,
+            new_count=0,
+            pending_count=0,
+            queued_count=0,
+            deferred_count=0,
+            expired_count=0,
+            sent_count=0,
+            all_providers_failed=True,
+        )
+        degraded = scrape_state.degraded_providers(status, 3)
+        self.assertEqual(degraded[0]["provider"], "linkedin")
+        self.assertEqual(degraded[0]["failures"], 3)
+        scrape_state.mark_provider_alert_sent(["linkedin"])
+        self.assertEqual(scrape_state.degraded_providers(status, 3), [])
+
+        success_id = scrape_state.start_run([{"name": "linkedin"}])
+        scrape_state.record_success("linkedin", 4)
+        scrape_state.complete_run(
+            success_id,
+            started_at=datetime(2026, 7, 27, tzinfo=timezone.utc),
+            provider_status={"linkedin": {"status": "success"}},
+            scraped_count=4,
+            matched_count=0,
+            new_count=0,
+            pending_count=0,
+            queued_count=0,
+            deferred_count=0,
+            expired_count=0,
+            sent_count=0,
+            all_providers_failed=False,
+        )
+        self.assertEqual(scrape_state.degraded_providers(status, 3), [])

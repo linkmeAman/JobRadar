@@ -1,0 +1,7 @@
+[Unit]
+Description=Back up Job Radar SQLite state
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/job-radar
+ExecStart=/opt/job-radar/.venv/bin/python -m job_radar.backup --destination /opt/job-radar/data/backups --retention-days 14

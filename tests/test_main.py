@@ -41,6 +41,31 @@ def _config() -> dict:
 
 
 class MainTests(unittest.TestCase):
+    def test_provider_alert_sends_once_for_degraded_provider(self) -> None:
+        with patch(
+            "job_radar.main.scrape_state.degraded_providers",
+            return_value=[
+                {
+                    "provider": "linkedin",
+                    "failures": 3,
+                    "status": "failure",
+                    "error": "HTTP 429",
+                }
+            ],
+        ), patch(
+            "job_radar.main.notifier.send_health_alert"
+        ) as send_alert, patch(
+            "job_radar.main.scrape_state.mark_provider_alert_sent"
+        ) as mark_alert:
+            main._maybe_send_provider_alert(
+                {"monitoring": {"provider_failure_alert_runs": 3}},
+                {"linkedin": {"status": "failure"}},
+            )
+
+        send_alert.assert_called_once()
+        self.assertIn("linkedin", send_alert.call_args.args[0])
+        mark_alert.assert_called_once_with(["linkedin"])
+
     def test_normal_run_caps_pending_alerts_and_records_history(self) -> None:
         config = _config()
         scraped = pd.DataFrame([{"title": "Backend Engineer"}])

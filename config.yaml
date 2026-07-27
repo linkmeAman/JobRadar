@@ -54,6 +54,14 @@ monitoring:
   # Alert once per outage streak, after all selected providers have failed
   # this many consecutive scheduled runs.
   all_provider_failure_alert_runs: 3
+  # Alert once per provider failure streak, even when other providers succeed.
+  provider_failure_alert_runs: 3
+
+backups:
+  # SQLite contains application history as well as scraper state.
+  enabled: true
+  path: "data/backups"
+  retention_days: 14
 
 applications:
   enabled: true
