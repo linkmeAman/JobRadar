@@ -42,8 +42,7 @@ TELEGRAM_BOT_TOKEN=123456789:your_complete_botfather_token
 TELEGRAM_CHAT_ID=your_personal_chat_id
 ```
 
-Send `/start` to the bot before the first run. Keep `.env` private; it is
-ignored by Git.
+Send `/start` to the bot before the first run. `.env` is ignored by Git.
 
 ## Resume automation and search generation
 
@@ -83,26 +82,14 @@ run at most every six hours; HN runs every twelve hours. Attempt times,
 results, errors, and rate-limit cooldowns are stored in the same SQLite state
 and `scrape_runs` history as JobSpy providers.
 
-Wellfound, Instahyre, Turing, Blind, and YC Work at a Startup are not scraped.
-They either require an authenticated workflow, are not conventional job feeds,
-or did not expose a sufficiently stable public interface for this release.
-
-## Safe tuning with dry-run
-
-This is the recommended first test after changing a resume or matching rule:
+## Dry run
 
 ```bash
 python main.py --dry-run
 ```
 
-`--explain` is an equivalent, more explicit alias:
-
-```bash
-python main.py --explain
-```
-
-The diagnostic run performs the real resume refresh, query selection, scrape,
-all enabled external sources, and matching, but it does not:
+`--explain` is an alias. The diagnostic run performs resume refresh, query
+selection, scraping, and matching without:
 
 - validate or call Telegram;
 - advance the search rotation cursor;
@@ -156,24 +143,21 @@ Use that ID to label the result:
 ```bash
 python main.py --feedback 1a2b3c4d5e6f relevant
 python main.py --feedback 1a2b3c4d5e6f irrelevant
-python main.py --feedback 1a2b3c4d5e6f applied
 ```
 
-`relevant` and `applied` labels add small bonuses for repeatedly accepted
-skills. `irrelevant` adds a conservative company penalty. Feedback never
-creates an automatic hard exclusion, so one label cannot permanently hide a
-whole class of jobs.
+Positive feedback adds small bonuses for repeatedly accepted skills.
+`irrelevant` adds a conservative company penalty without creating a hard
+exclusion.
 
 ## Application tracking and follow-ups
 
-Every Telegram job alert includes an application command using the same short
-ID:
+Every Telegram job alert includes a short ID:
 
 ```text
-✅ /applied 1a2b3c4d5e6f
+🆔 1a2b3c4d5e6f
 ```
 
-Send that command to the bot after applying. Job Radar records the original
+Send `/applied <id>` to the bot after applying. Job Radar records the original
 application time, sets the status to `applied`, and uses the application as
 positive relevance feedback. Repeating `/applied` is safe and does not reset
 the original date.
@@ -195,11 +179,8 @@ the bot sends one compact reminder for active applications whose
 `last_contact` is at least seven days old. `/contacted` resets that clock;
 terminal statuses are not included in later reminders.
 
-The existing CLI command also creates an application record:
-
-```bash
-python main.py --feedback 1a2b3c4d5e6f applied
-```
+The equivalent CLI command is
+`python main.py --feedback 1a2b3c4d5e6f applied`.
 
 ## Deduplication and pending expiry
 
@@ -260,15 +241,8 @@ semantic:
   enabled: true
 ```
 
-Job Radar uses the current
-[`text-embedding-3-small`](https://developers.openai.com/api/docs/models/text-embedding-3-small)
-model and the standard bearer-token authentication described in the
-[OpenAI API quickstart](https://platform.openai.com/docs/quickstart/make-your-first-api-request).
-Enabling this feature sends the compact resume profile and limited job text to
-OpenAI. Review the applicable
-[API data controls](https://platform.openai.com/docs/models/default-usage-policies-by-endpoint)
-before enabling it. `semantic.fail_open: true` keeps deterministic results
-working if the optional request fails.
+The configured model receives a compact resume profile and limited job text.
+`semantic.fail_open: true` preserves deterministic results if scoring fails.
 
 ## Important configuration
 
@@ -294,22 +268,16 @@ working if the optional request fails.
 
 ## Tests
 
-The automated suite makes no real JobSpy, Telegram, or OpenAI requests:
+The automated suite makes no external requests:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-Then run the real non-delivery diagnostic pipeline:
+Run the live pipeline without delivery or state changes:
 
 ```bash
 python main.py --dry-run
-```
-
-Finally, after checking the explanation output, run one normal delivery:
-
-```bash
-python main.py
 ```
 
 ## Systemd installation
