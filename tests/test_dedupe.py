@@ -124,6 +124,24 @@ class DedupeTests(unittest.TestCase):
                     json.dumps({"job_url": job["job_url"]}),
                 ),
             )
+            connection.execute(
+                """
+                CREATE TABLE applications (
+                    job_id TEXT PRIMARY KEY,
+                    applied_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    last_contact TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO applications
+                    (job_id, applied_at, status, last_contact)
+                VALUES (?, CURRENT_TIMESTAMP, 'applied', CURRENT_TIMESTAMP)
+                """,
+                (legacy_id,),
+            )
             connection.commit()
         finally:
             connection.close()
@@ -138,9 +156,13 @@ class DedupeTests(unittest.TestCase):
             migrated = connection.execute(
                 "SELECT job_id FROM seen_jobs"
             ).fetchone()[0]
+            migrated_application = connection.execute(
+                "SELECT job_id FROM applications"
+            ).fetchone()[0]
         finally:
             connection.close()
         self.assertEqual(migrated, dedupe.job_id_for(current.iloc[0]))
+        self.assertEqual(migrated_application, migrated)
         self.assertNotEqual(migrated, legacy_id)
 
     def test_same_legacy_fields_with_different_urls_are_distinct(self) -> None:

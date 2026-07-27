@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -14,6 +15,7 @@ import requests
 
 
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
+TELEGRAM_UPDATES_URL = "https://api.telegram.org/bot{token}/getUpdates"
 SEND_DELAY_SECONDS = 0.3
 MAX_SEND_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = 1.0
@@ -132,7 +134,9 @@ def format_job_message(row: pd.Series) -> str:
     lines.append(f"🔗 {job_url}")
     job_id = _value(row, "job_id")
     if _is_present(job_id):
-        lines.append(f"🆔 {str(job_id)[:12]}")
+        short_id = str(job_id)[:12]
+        lines.append(f"🆔 {short_id}")
+        lines.append(f"✅ /applied {short_id}")
     return "\n".join(lines)
 
 
@@ -215,11 +219,38 @@ def send_all(
     return sent
 
 
+def send_text(text: str) -> None:
+    """Send one non-job message to the configured Telegram chat."""
+    token, chat_id = get_credentials()
+    _send_message(TELEGRAM_API_URL.format(token=token), chat_id, text)
+
+
+def fetch_updates(offset: int | None = None) -> list[dict[str, Any]]:
+    """Fetch pending message updates without using a Telegram SDK."""
+    token, _ = get_credentials()
+    params: dict[str, Any] = {
+        "timeout": 0,
+        "allowed_updates": json.dumps(["message"]),
+    }
+    if offset is not None:
+        params["offset"] = offset
+    try:
+        response = requests.get(
+            TELEGRAM_UPDATES_URL.format(token=token),
+            params=params,
+            timeout=20,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError):
+        raise RuntimeError("Telegram command polling failed") from None
+    if payload.get("ok") is not True or not isinstance(
+        payload.get("result"), list
+    ):
+        raise RuntimeError("Telegram returned invalid command updates")
+    return payload["result"]
+
+
 def send_health_alert(message: str) -> None:
     """Send one operational alert through the configured Telegram chat."""
-    token, chat_id = get_credentials()
-    _send_message(
-        TELEGRAM_API_URL.format(token=token),
-        chat_id,
-        f"⚠️ Job Radar health alert\n{message}",
-    )
+    send_text(f"⚠️ Job Radar health alert\n{message}")

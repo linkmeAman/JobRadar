@@ -1,0 +1,356 @@
+"""SQLite application tracking and Telegram command handling."""
+
+from __future__ import annotations
+
+import json
+import logging
+import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import dedupe
+import notifier
+
+
+DATABASE_PATH = dedupe.DATABASE_PATH
+ACTIVE_STATUSES = {"applied", "screening", "interview"}
+TERMINAL_STATUSES = {"offer", "rejected", "withdrawn"}
+VALID_STATUSES = ACTIVE_STATUSES | TERMINAL_STATUSES
+_UPDATE_OFFSET_KEY = "telegram_application_update_offset"
+_REMINDER_CHECK_KEY = "application_last_reminder_check"
+
+_APPLICATIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS applications (
+    job_id TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    last_contact TEXT NOT NULL,
+    FOREIGN KEY(job_id) REFERENCES seen_jobs(job_id)
+)
+"""
+
+_RUNTIME_SCHEMA = """
+CREATE TABLE IF NOT EXISTS runtime_state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+)
+"""
+
+
+@dataclass(frozen=True)
+class ApplicationChange:
+    job_id: str
+    created: bool = False
+    status: str | None = None
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _connect() -> sqlite3.Connection:
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(DATABASE_PATH)
+    connection.execute(_APPLICATIONS_SCHEMA)
+    connection.execute(_RUNTIME_SCHEMA)
+    return connection
+
+
+def mark_applied(
+    job_id_or_prefix: str, *, now: datetime | None = None
+) -> ApplicationChange:
+    """Track an application once and retain its original application time."""
+    job_id = dedupe.resolve_job_id(job_id_or_prefix)
+    timestamp = (now or _now()).isoformat()
+    connection = _connect()
+    try:
+        with connection:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO applications
+                    (job_id, applied_at, status, last_contact)
+                VALUES (?, ?, 'applied', ?)
+                """,
+                (job_id, timestamp, timestamp),
+            )
+    finally:
+        connection.close()
+    dedupe.record_feedback(job_id, "applied")
+    return ApplicationChange(
+        job_id=job_id,
+        created=cursor.rowcount == 1,
+        status="applied",
+    )
+
+
+def mark_contacted(
+    job_id_or_prefix: str, *, now: datetime | None = None
+) -> ApplicationChange:
+    """Record the latest recruiter or company contact time."""
+    job_id = dedupe.resolve_job_id(job_id_or_prefix)
+    connection = _connect()
+    try:
+        with connection:
+            cursor = connection.execute(
+                """
+                UPDATE applications SET last_contact = ?
+                WHERE job_id = ?
+                """,
+                ((now or _now()).isoformat(), job_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    f"job {job_id[:12]} is not tracked; use /applied first"
+                )
+            status = connection.execute(
+                "SELECT status FROM applications WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()[0]
+    finally:
+        connection.close()
+    return ApplicationChange(job_id=job_id, status=str(status))
+
+
+def set_status(
+    job_id_or_prefix: str,
+    status: str,
+    *,
+    now: datetime | None = None,
+) -> ApplicationChange:
+    """Set an application stage and treat the transition as fresh contact."""
+    normalized = status.strip().lower()
+    if normalized not in VALID_STATUSES:
+        choices = ", ".join(sorted(VALID_STATUSES))
+        raise ValueError(f"status must be one of: {choices}")
+    job_id = dedupe.resolve_job_id(job_id_or_prefix)
+    connection = _connect()
+    try:
+        with connection:
+            cursor = connection.execute(
+                """
+                UPDATE applications
+                SET status = ?, last_contact = ?
+                WHERE job_id = ?
+                """,
+                (normalized, (now or _now()).isoformat(), job_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    f"job {job_id[:12]} is not tracked; use /applied first"
+                )
+    finally:
+        connection.close()
+    return ApplicationChange(job_id=job_id, status=normalized)
+
+
+def stale_applications(
+    silent_days: int,
+    *,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Return active applications with no contact inside the threshold."""
+    if silent_days <= 0 or not DATABASE_PATH.exists():
+        return []
+    connection = _connect()
+    try:
+        cutoff = ((now or _now()) - timedelta(days=silent_days)).isoformat()
+        rows = connection.execute(
+            """
+            SELECT a.job_id, a.applied_at, a.status, a.last_contact,
+                   s.title, s.company, s.notification_payload
+            FROM applications a
+            JOIN seen_jobs s ON s.job_id = a.job_id
+            WHERE a.status IN ('applied', 'screening', 'interview')
+              AND a.last_contact <= ?
+            ORDER BY a.last_contact, a.applied_at
+            """,
+            (cutoff,),
+        ).fetchall()
+    finally:
+        connection.close()
+
+    results: list[dict[str, Any]] = []
+    for (
+        job_id,
+        applied_at,
+        status,
+        last_contact,
+        title,
+        company,
+        payload,
+    ) in rows:
+        try:
+            stored = json.loads(payload or "{}")
+        except (json.JSONDecodeError, TypeError):
+            stored = {}
+        results.append(
+            {
+                "job_id": job_id,
+                "applied_at": applied_at,
+                "status": status,
+                "last_contact": last_contact,
+                "title": stored.get("title") or title,
+                "company": stored.get("company") or company,
+            }
+        )
+    return results
+
+
+def _runtime_value(key: str) -> str | None:
+    if not DATABASE_PATH.exists():
+        return None
+    connection = _connect()
+    try:
+        row = connection.execute(
+            "SELECT value FROM runtime_state WHERE key = ?", (key,)
+        ).fetchone()
+        return None if row is None else str(row[0])
+    finally:
+        connection.close()
+
+
+def _set_runtime_value(key: str, value: str) -> None:
+    connection = _connect()
+    try:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO runtime_state (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, value),
+            )
+    finally:
+        connection.close()
+
+
+def update_offset() -> int | None:
+    value = _runtime_value(_UPDATE_OFFSET_KEY)
+    return None if value is None else int(value)
+
+
+def _record_update(update_id: int) -> None:
+    _set_runtime_value(_UPDATE_OFFSET_KEY, str(update_id + 1))
+
+
+def reminder_due(
+    interval_hours: float, *, now: datetime | None = None
+) -> bool:
+    value = _runtime_value(_REMINDER_CHECK_KEY)
+    if value is None:
+        return True
+    return (now or _now()) >= (
+        datetime.fromisoformat(value) + timedelta(hours=interval_hours)
+    )
+
+
+def _record_reminder_check(*, now: datetime | None = None) -> None:
+    _set_runtime_value(_REMINDER_CHECK_KEY, (now or _now()).isoformat())
+
+
+def _command_reply(text: str) -> str | None:
+    parts = text.strip().split()
+    if not parts:
+        return None
+    command = parts[0].split("@", 1)[0].lower()
+    try:
+        if command == "/applied":
+            if len(parts) != 2:
+                return "Usage: /applied <job_id>"
+            change = mark_applied(parts[1])
+            prefix = "Application saved" if change.created else "Already tracked"
+            return f"✅ {prefix}: {change.job_id[:12]}"
+        if command == "/contacted":
+            if len(parts) != 2:
+                return "Usage: /contacted <job_id>"
+            change = mark_contacted(parts[1])
+            return f"✅ Contact updated: {change.job_id[:12]}"
+        if command == "/status":
+            if len(parts) != 3:
+                return "Usage: /status <job_id> <status>"
+            change = set_status(parts[1], parts[2])
+            return (
+                f"✅ Status updated: {change.job_id[:12]} → "
+                f"{change.status}"
+            )
+    except ValueError as exc:
+        return f"❌ {exc}"
+    return None
+
+
+def process_telegram_commands() -> int:
+    """Apply supported commands from the authorized Telegram chat."""
+    _, configured_chat_id = notifier.get_credentials()
+    updates = notifier.fetch_updates(offset=update_offset())
+    processed = 0
+    for update in updates:
+        update_id = update.get("update_id")
+        if not isinstance(update_id, int):
+            continue
+        message = update.get("message") or {}
+        chat_id = str((message.get("chat") or {}).get("id", ""))
+        text = message.get("text")
+        if chat_id == configured_chat_id and isinstance(text, str):
+            reply = _command_reply(text)
+            if reply is not None:
+                notifier.send_text(reply)
+                processed += 1
+        _record_update(update_id)
+    return processed
+
+
+def maybe_send_stale_reminder(
+    settings: dict[str, Any], *, now: datetime | None = None
+) -> int:
+    """Send at most one stale-application summary per configured interval."""
+    if not settings.get("enabled", False):
+        return 0
+    interval = float(settings.get("reminder_interval_hours", 24))
+    if not reminder_due(interval, now=now):
+        return 0
+
+    silent_days = int(settings.get("stale_after_days", 7))
+    stale = stale_applications(silent_days, now=now)
+    if not stale:
+        _record_reminder_check(now=now)
+        return 0
+
+    limit = max(1, int(settings.get("max_reminders_per_message", 10)))
+    lines = [
+        f"📋 Application follow-up: {len(stale)} silent for "
+        f"{silent_days}+ days"
+    ]
+    for application in stale[:limit]:
+        lines.append(
+            "• {title} — {company} [{status}] · 🆔 {job_id}".format(
+                title=application["title"],
+                company=application["company"],
+                status=application["status"],
+                job_id=application["job_id"][:12],
+            )
+        )
+    if len(stale) > limit:
+        lines.append(f"…and {len(stale) - limit} more")
+    lines.append("Use /contacted <id> after a reply.")
+    notifier.send_text("\n".join(lines))
+    _record_reminder_check(now=now)
+    return len(stale)
+
+
+def run_automation(settings: dict[str, Any]) -> tuple[int, int]:
+    """Process commands and the daily reminder without blocking scraping."""
+    if not settings.get("enabled", False):
+        return 0, 0
+    commands = 0
+    reminders = 0
+    try:
+        commands = process_telegram_commands()
+    except (RuntimeError, ValueError, sqlite3.Error) as exc:
+        logging.error("application_commands=failed error=%s", exc)
+    try:
+        reminders = maybe_send_stale_reminder(settings)
+    except (RuntimeError, ValueError, sqlite3.Error) as exc:
+        logging.error("application_reminder=failed error=%s", exc)
+    return commands, reminders

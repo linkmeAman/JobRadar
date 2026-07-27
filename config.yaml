@@ -55,6 +55,12 @@ monitoring:
   # this many consecutive scheduled runs.
   all_provider_failure_alert_runs: 3
 
+applications:
+  enabled: true
+  stale_after_days: 7
+  reminder_interval_hours: 24
+  max_reminders_per_message: 10
+
 semantic:
   # Optional second-stage scoring for borderline jobs. When enabled, only a
   # compact roles/skills profile and limited job text are sent to OpenAI.

@@ -35,6 +35,7 @@ def _config() -> dict:
             "allowed_countries": ["India"],
         },
         "dynamic_searches": {"enabled": True},
+        "applications": {"enabled": True},
         "semantic": {"enabled": False},
         "searches": [{"name": "one"}, {"name": "two"}],
     }
@@ -65,6 +66,9 @@ class MainTests(unittest.TestCase):
         ), patch(
             "main.notifier.validate_delivery_target"
         ), patch(
+            "main.application_tracker.run_automation",
+            return_value=(1, 2),
+        ) as application_automation, patch(
             "main.resume_profile.load_or_refresh",
             return_value={"skills": ["python"], "roles": ["backend engineer"]},
         ), patch(
@@ -98,6 +102,9 @@ class MainTests(unittest.TestCase):
         self.assertEqual(len(queued), 10)
         self.assertEqual(queued.iloc[0]["job_id"], "job-0")
         self.assertEqual(complete.call_args.kwargs["sent_count"], 10)
+        application_automation.assert_called_once_with(
+            config["applications"]
+        )
 
     def test_dry_run_does_not_validate_send_or_write_sqlite(self) -> None:
         config = _config()
@@ -149,13 +156,16 @@ class MainTests(unittest.TestCase):
             "main.dedupe.filter_new"
         ) as filter_new, patch(
             "main.notifier.send_all"
-        ) as send_all:
+        ) as send_all, patch(
+            "main.application_tracker.run_automation"
+        ) as application_automation:
             main.main(["--dry-run"])
 
         validate.assert_not_called()
         start_run.assert_not_called()
         filter_new.assert_not_called()
         send_all.assert_not_called()
+        application_automation.assert_not_called()
         self.assertFalse(run_all.call_args.kwargs["persist_state"])
 
     def test_external_jobs_join_jobspy_results_before_matching(self) -> None:

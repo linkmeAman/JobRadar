@@ -70,3 +70,11 @@ class ConfigTests(unittest.TestCase):
         self.assertLessEqual(
             external["sources"]["cutshort"]["max_results_per_page"], 20
         )
+
+    def test_application_followup_defaults_are_daily(self) -> None:
+        applications = self.config["applications"]
+        self.assertTrue(applications["enabled"])
+        self.assertEqual(applications["stale_after_days"], 7)
+        self.assertGreaterEqual(
+            applications["reminder_interval_hours"], 24
+        )

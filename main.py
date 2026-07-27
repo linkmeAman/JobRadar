@@ -11,6 +11,7 @@ from typing import Any, Sequence
 import pandas as pd
 import yaml
 
+import application_tracker
 import dedupe
 import matcher
 import notifier
@@ -122,6 +123,14 @@ def run(*, dry_run: bool = False, explain: bool = False) -> None:
         semantic.validate_settings(config.get("semantic", {}))
         if not dry_run:
             notifier.validate_delivery_target()
+            commands, reminders = application_tracker.run_automation(
+                config.get("applications", {})
+            )
+            logging.info(
+                "application_commands=%d stale_applications=%d",
+                commands,
+                reminders,
+            )
 
         resume = config["resume"]
         profile = resume_profile.load_or_refresh(
@@ -356,7 +365,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = _parser().parse_args(parse_argv)
     if args.feedback:
         job_id, label = args.feedback
-        saved = dedupe.record_feedback(job_id, label)
+        if label == "applied":
+            change = application_tracker.mark_applied(job_id)
+            saved = change.job_id
+        else:
+            saved = dedupe.record_feedback(job_id, label)
         print(f"feedback_saved job_id={saved} label={label}")
         return
     run(dry_run=args.dry_run or args.explain, explain=args.explain)

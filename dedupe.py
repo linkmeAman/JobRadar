@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -304,6 +305,20 @@ def filter_new(df: pd.DataFrame) -> pd.DataFrame:
                         """,
                         (primary_id, legacy_id),
                     )
+                    applications_table = connection.execute(
+                        """
+                        SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = 'applications'
+                        """
+                    ).fetchone()
+                    if applications_table:
+                        connection.execute(
+                            """
+                            UPDATE applications SET job_id = ?
+                            WHERE job_id = ?
+                            """,
+                            (primary_id, legacy_id),
+                        )
                     continue
 
                 cursor = connection.execute(
@@ -401,12 +416,13 @@ def mark_notified(job_id: str) -> None:
         connection.close()
 
 
-def record_feedback(job_id_or_prefix: str, label: str) -> str:
-    """Attach a relevance label to one exact or uniquely prefixed job ID."""
-    if label not in {"relevant", "irrelevant", "applied"}:
-        raise ValueError("feedback must be relevant, irrelevant, or applied")
+def resolve_job_id(job_id_or_prefix: str) -> str:
+    """Resolve one exact or uniquely prefixed ID from the seen jobs table."""
     if not DATABASE_PATH.exists():
         raise ValueError("no Job Radar database exists yet")
+    normalized = job_id_or_prefix.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{6,64}", normalized):
+        raise ValueError("job ID must contain 6-64 hexadecimal characters")
 
     connection = sqlite3.connect(DATABASE_PATH)
     try:
@@ -418,14 +434,27 @@ def record_feedback(job_id_or_prefix: str, label: str) -> str:
             ORDER BY CASE WHEN job_id = ? THEN 0 ELSE 1 END
             LIMIT 2
             """,
-            (job_id_or_prefix, f"{job_id_or_prefix}%", job_id_or_prefix),
+            (normalized, f"{normalized}%", normalized),
         ).fetchall()
-        if not rows:
-            raise ValueError(f"no job matches ID {job_id_or_prefix}")
-        exact = [row[0] for row in rows if row[0] == job_id_or_prefix]
-        if not exact and len(rows) > 1:
-            raise ValueError("job ID prefix is ambiguous; provide more characters")
-        job_id = exact[0] if exact else rows[0][0]
+    finally:
+        connection.close()
+    if not rows:
+        raise ValueError(f"no job matches ID {normalized}")
+    exact = [row[0] for row in rows if row[0] == normalized]
+    if not exact and len(rows) > 1:
+        raise ValueError("job ID prefix is ambiguous; provide more characters")
+    return exact[0] if exact else rows[0][0]
+
+
+def record_feedback(job_id_or_prefix: str, label: str) -> str:
+    """Attach a relevance label to one exact or uniquely prefixed job ID."""
+    if label not in {"relevant", "irrelevant", "applied"}:
+        raise ValueError("feedback must be relevant, irrelevant, or applied")
+
+    job_id = resolve_job_id(job_id_or_prefix)
+    connection = sqlite3.connect(DATABASE_PATH)
+    try:
+        _initialize_schema(connection)
         with connection:
             connection.execute(
                 """

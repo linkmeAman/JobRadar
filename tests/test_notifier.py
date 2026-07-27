@@ -83,6 +83,7 @@ class NotifierTests(unittest.TestCase):
     def test_job_message_includes_feedback_identifier(self) -> None:
         message = notifier.format_job_message(self.job.iloc[0])
         self.assertIn("🆔 job-1", message)
+        self.assertIn("/applied job-1", message)
 
     def test_health_alert_uses_same_bot_api(self) -> None:
         with patch(
@@ -94,3 +95,17 @@ class NotifierTests(unittest.TestCase):
             "Job Radar health alert",
             post.call_args.kwargs["json"]["text"],
         )
+
+    def test_fetch_updates_uses_persisted_offset(self) -> None:
+        response = FakeResponse(
+            200,
+            {"ok": True, "result": [{"update_id": 42}]},
+        )
+        with patch(
+            "notifier.requests.get", return_value=response
+        ) as get:
+            updates = notifier.fetch_updates(offset=42)
+
+        self.assertEqual(updates, [{"update_id": 42}])
+        self.assertEqual(get.call_args.kwargs["params"]["offset"], 42)
+        self.assertEqual(get.call_args.kwargs["params"]["timeout"], 0)

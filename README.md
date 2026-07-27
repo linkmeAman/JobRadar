@@ -164,6 +164,43 @@ skills. `irrelevant` adds a conservative company penalty. Feedback never
 creates an automatic hard exclusion, so one label cannot permanently hide a
 whole class of jobs.
 
+## Application tracking and follow-ups
+
+Every Telegram job alert includes an application command using the same short
+ID:
+
+```text
+✅ /applied 1a2b3c4d5e6f
+```
+
+Send that command to the bot after applying. Job Radar records the original
+application time, sets the status to `applied`, and uses the application as
+positive relevance feedback. Repeating `/applied` is safe and does not reset
+the original date.
+
+Use these commands as the application progresses:
+
+```text
+/contacted 1a2b3c4d5e6f
+/status 1a2b3c4d5e6f screening
+/status 1a2b3c4d5e6f interview
+/status 1a2b3c4d5e6f offer
+/status 1a2b3c4d5e6f rejected
+/status 1a2b3c4d5e6f withdrawn
+```
+
+Only messages from `TELEGRAM_CHAT_ID` are accepted. A persistent update cursor
+prevents commands from being replayed on later 30-minute runs. Once per day,
+the bot sends one compact reminder for active applications whose
+`last_contact` is at least seven days old. `/contacted` resets that clock;
+terminal statuses are not included in later reminders.
+
+The existing CLI command also creates an application record:
+
+```bash
+python main.py --feedback 1a2b3c4d5e6f applied
+```
+
 ## Deduplication and pending expiry
 
 New records prefer `sha256(normalized_job_url)` as their identity. Tracking
@@ -184,8 +221,10 @@ SQLite at `data/jobs.db` contains:
 
 - `seen_jobs`: identity, retry payload, delivery time, and expiry time;
 - `job_feedback`: relevant, irrelevant, and applied labels;
+- `applications`: application date, current status, and latest contact;
 - `provider_state`: provider results, 429 streaks, and cooldowns;
-- `runtime_state`: the rotating search cursor;
+- `runtime_state`: search/source cursors, Telegram update offset, and reminder
+  schedule;
 - `scrape_runs`: duration, selected searches, provider status/errors,
   cooldown details, counts, failures, and health-alert state.
 
@@ -244,6 +283,9 @@ working if the optional request fails.
 - `matching.minimum_score`: alert threshold.
 - `matching.max_alerts_per_run`: Telegram cap per run.
 - `matching.pending_expiry_days`: pending retry lifetime.
+- `applications.stale_after_days`: silence threshold for follow-up reminders.
+- `applications.reminder_interval_hours`: minimum reminder-check interval.
+- `applications.max_reminders_per_message`: application rows in one reminder.
 - `matching.maximum_required_years`: experience ceiling.
 - `matching.allowed_countries`: allowed non-remote job countries.
 - `matching.excluded_title_terms`: immediate title exclusions.
@@ -317,6 +359,8 @@ journalctl -u job-radar.service -n 100 --no-pager
 - `pending>queued`: the alert cap is working; remaining jobs stay pending.
 - Telegram 401: token invalid or revoked.
 - Telegram 403: wrong chat ID, bot blocked, or `/start` not sent.
+- `application_commands=failed`: confirm the bot does not have a webhook;
+  Telegram does not allow webhook delivery and `getUpdates` polling together.
 - `OPENAI_API_KEY must be set`: semantic scoring was enabled without a key.
 
 Keep `.env`, `data/jobs.db`, `data/resume_profile.json`, and resume PDFs private.

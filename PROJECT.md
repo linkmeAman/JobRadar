@@ -45,6 +45,7 @@ job-radar/
 ├── semantic.py            # optional embedding score for borderline jobs
 ├── run_lock.py            # manual/systemd single-instance protection
 ├── dedupe.py              # URL-aware SQLite dedupe, delivery, and feedback
+├── application_tracker.py # Telegram commands and follow-up state
 ├── sources/
 │   ├── runner.py          # low-frequency scheduling and failure isolation
 │   ├── hacker_news.py     # HN Who's Hiring API adapter
@@ -339,3 +340,22 @@ and are recorded in `scrape_runs`.
 
 Dry-run forces due-source evaluation for tuning but does not write source
 attempts, cooldowns, rotation state, dedupe state, or run history.
+
+## 16. Application Tracking
+
+Application tracking uses the short ID already included in each Telegram job
+alert. The `applications` table stores `job_id`, `applied_at`, `status`, and
+`last_contact`. `/applied <id>` creates an idempotent record and also retains
+the existing positive feedback behavior. `/contacted <id>` refreshes the
+follow-up clock, while `/status <id> <status>` moves the record through
+`applied`, `screening`, `interview`, `offer`, `rejected`, or `withdrawn`.
+
+The scheduled process reads Bot API updates directly with `requests`. It only
+executes commands from `TELEGRAM_CHAT_ID` and persists the next update offset
+in `runtime_state`, preventing replay after process restarts. Command polling
+and reminder errors are isolated from scraping.
+
+At most once per 24 hours, one Telegram summary identifies active applications
+whose `last_contact` is at least seven days old. Terminal statuses do not
+produce reminders. All thresholds and the per-message cap are configured under
+`applications` in `config.yaml`.
