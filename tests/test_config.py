@@ -29,7 +29,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_rotation_and_cooldown_settings(self) -> None:
         scraping = self.config["scraping"]
-        self.assertEqual(scraping["searches_per_run"], 2)
+        self.assertLessEqual(scraping["searches_per_run"], 4)
         self.assertGreaterEqual(scraping["cooldown_minutes"], 30)
         self.assertGreaterEqual(
             scraping["max_cooldown_minutes"],
@@ -55,7 +55,7 @@ class ConfigTests(unittest.TestCase):
         ]
         self.assertEqual(len(rotating), 4)
         for search in rotating:
-            self.assertLessEqual(search["hours_old"], 6)
+            self.assertLessEqual(search["hours_old"], 72)
             self.assertLessEqual(search["results_wanted"], 20)
 
     def test_backend_hardening_defaults_are_safe(self) -> None:

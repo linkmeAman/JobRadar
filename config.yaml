@@ -3,9 +3,9 @@ telegram:
   chat_id: ${TELEGRAM_CHAT_ID}
 
 scraping:
-  # Two rotating role searches plus the always-run Indeed search are processed
-  # every 30 minutes. All four role searches are covered once per hour.
-  searches_per_run: 2
+  # Four rotating role searches plus the always-run Indeed search are processed
+  # every run.
+  searches_per_run: 4
   cooldown_minutes: 120
   max_cooldown_minutes: 720
 
@@ -18,7 +18,7 @@ dynamic_searches:
   location: "India"
   is_remote: true
   job_type: fulltime
-  hours_old: 6
+  hours_old: 72
   results_wanted: 20
 
 resume:
@@ -119,8 +119,7 @@ external_sources:
           page_url: "https://www.hirist.tech/c/ai-ml-jobs"
 
 searches:
-  # Resume-aligned backend searches. A six-hour window gives rotated searches
-  # ample overlap while avoiding repeated 24-hour result pagination.
+  # Resume-aligned backend searches.
   - name: python_fastapi_backend_li_google
     site_name: [linkedin, google]
     search_term: "Python backend engineer FastAPI"
@@ -128,7 +127,7 @@ searches:
     location: "India"
     is_remote: true
     job_type: fulltime
-    hours_old: 6
+    hours_old: 72
     results_wanted: 20
 
   - name: golang_aws_backend_li_google
@@ -138,7 +137,7 @@ searches:
     location: "India"
     is_remote: true
     job_type: fulltime
-    hours_old: 6
+    hours_old: 72
     results_wanted: 20
 
   - name: platform_devops_li_google
@@ -148,7 +147,7 @@ searches:
     location: "India"
     is_remote: true
     job_type: fulltime
-    hours_old: 6
+    hours_old: 72
     results_wanted: 20
 
   - name: django_microservices_li_google
@@ -158,7 +157,7 @@ searches:
     location: "India"
     is_remote: true
     job_type: fulltime
-    hours_old: 6
+    hours_old: 72
     results_wanted: 20
 
   # Indeed: no hours_old (conflicts with job_type/is_remote), country_indeed

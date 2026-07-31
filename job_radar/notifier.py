@@ -8,6 +8,7 @@ import os
 import re
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -25,8 +26,19 @@ _BOT_TOKEN_PATTERN = re.compile(r"^\d+:[A-Za-z0-9_-]+$")
 _CHAT_ID_PATTERN = re.compile(r"^-?\d+$")
 
 
+def _load_env_file() -> None:
+    env_path = Path(".env")
+    if env_path.is_file():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, val = line.split("=", 1)
+                os.environ.setdefault(key.strip(), val.strip().strip("'\""))
+
+
 def get_credentials() -> tuple[str, str]:
     """Read and validate Telegram credentials without exposing their values."""
+    _load_env_file()
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
