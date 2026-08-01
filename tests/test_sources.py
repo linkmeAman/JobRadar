@@ -6,7 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pandas as pd
 
@@ -46,6 +46,13 @@ class RoutingSession:
             if marker in url:
                 return response
         raise AssertionError(f"unexpected URL: {url}")
+
+
+def _make_adaptor(html: str):
+    """Create a Scrapling Adaptor from HTML text for test mocking."""
+    from scrapling.parser import Adaptor
+
+    return Adaptor(html, auto_match=False)
 
 
 class SourceAdapterTests(unittest.TestCase):
@@ -111,12 +118,18 @@ class SourceAdapterTests(unittest.TestCase):
 
     def test_cutshort_parses_public_job_card(self) -> None:
         html = (FIXTURES / "cutshort_jobs.html").read_text(encoding="utf-8")
-        session = RoutingSession({"cutshort.io": FakeResponse(text=html)})
-        jobs = cutshort.scrape(
-            {"pages": ["https://cutshort.io/jobs/api-jobs"]},
-            session,
-            20,
-        )
+        adaptor = _make_adaptor(html)
+        with patch.object(
+            cutshort, "Fetcher"
+        ) as mock_fetcher, patch.object(
+            cutshort.scrape_state, "record_scraper_health_event"
+        ):
+            mock_fetcher.get.return_value = adaptor
+            jobs = cutshort.scrape(
+                {"pages": ["https://cutshort.io/jobs/api-jobs"]},
+                MagicMock(),
+                20,
+            )
         self.assertEqual(len(jobs), 1)
         row = jobs.iloc[0]
         self.assertEqual(row["title"], "Backend Engineer")
@@ -130,25 +143,30 @@ class SourceAdapterTests(unittest.TestCase):
         payload = json.loads(
             (FIXTURES / "hirist_feed.json").read_text(encoding="utf-8")
         )
-        session = RoutingSession(
-            {
-                "www.hirist.tech": FakeResponse(text=html),
-                "gladiator.hirist.tech": FakeResponse(payload=payload),
-            }
-        )
-        jobs = hirist.scrape(
-            {
-                "categories": [
-                    {
-                        "page_url": (
-                            "https://www.hirist.tech/c/backend-development-jobs"
-                        )
-                    }
-                ]
-            },
-            session,
-            20,
-        )
+        category_adaptor = _make_adaptor(html)
+        feed_adaptor = _make_adaptor(json.dumps(payload))
+        with patch.object(
+            hirist, "StealthyFetcher"
+        ) as mock_stealthy, patch.object(
+            hirist, "Fetcher"
+        ) as mock_fetcher, patch.object(
+            hirist.scrape_state, "record_scraper_health_event"
+        ):
+            mock_stealthy.fetch.return_value = category_adaptor
+            mock_fetcher.get.return_value = feed_adaptor
+            jobs = hirist.scrape(
+                {
+                    "categories": [
+                        {
+                            "page_url": (
+                                "https://www.hirist.tech/c/backend-development-jobs"
+                            )
+                        }
+                    ]
+                },
+                MagicMock(),
+                20,
+            )
         self.assertEqual(len(jobs), 1)
         row = jobs.iloc[0]
         self.assertEqual(row["company"], "Example Labs")

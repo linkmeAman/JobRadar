@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _TABLES = {
     "seen_jobs": """
@@ -143,6 +143,14 @@ _TABLES = {
             identity_type TEXT NOT NULL,
             detected_at TEXT NOT NULL,
             FOREIGN KEY(job_id) REFERENCES seen_jobs(job_id)
+        )
+    """,
+    "scraper_health": """
+        CREATE TABLE IF NOT EXISTS scraper_health (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            event TEXT NOT NULL,
+            ts DATETIME NOT NULL
         )
     """,
 }

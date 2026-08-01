@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from urllib.parse import urlencode
 
-import requests
-from bs4 import BeautifulSoup
-
+from .. import scrape_state
 from .common import frame, slugify, utc_from_milliseconds
+from scrapling import Fetcher, StealthyFetcher
+from scrapling.parser import Adaptor
 
 
 FEED_URL = "https://gladiator.hirist.tech/job/category/"
@@ -19,13 +20,19 @@ _NEXT_DATA = re.compile(
 )
 
 
-def _category_id(
-    session: requests.Session, page_url: str, timeout: int
-) -> int:
-    response = session.get(page_url, timeout=timeout)
-    response.raise_for_status()
-    match = _NEXT_DATA.search(response.text)
+def _category_id(page_url: str, timeout: int) -> int:
+    """Fetch the category page through StealthyFetcher to bypass Cloudflare Turnstile."""
+    page = StealthyFetcher.fetch(
+        page_url,
+        headless=True,
+        timeout=timeout * 1000,
+    )
+    html = page.html_content or ""
+    match = _NEXT_DATA.search(html)
     if not match:
+        scrape_state.record_scraper_health_event(
+            "hirist", f"next_data_missing:{page_url}"
+        )
         raise RuntimeError("Hirist category metadata was not found")
     payload = json.loads(match.group(1))
     return int(payload["props"]["pageProps"]["categoryId"])
@@ -96,7 +103,12 @@ def scrape(
     session: requests.Session,
     timeout: int,
 ) -> Any:
-    """Fetch configured public Hirist backend and AI category feeds."""
+    """Fetch configured public Hirist backend and AI category feeds.
+
+    Uses StealthyFetcher for the category page (Cloudflare Turnstile) and
+    plain Fetcher for the JSON API.  The ``session`` parameter is accepted
+    for API compatibility but not used internally.
+    """
     rows: list[dict[str, Any]] = []
     categories = settings.get("categories") or []
     max_results = max(1, int(settings.get("max_results_per_category", 20)))
@@ -104,19 +116,27 @@ def scrape(
         category_id = category.get("id")
         if category_id is None:
             category_id = _category_id(
-                session, str(category["page_url"]), timeout
+                str(category["page_url"]), timeout
             )
-        response = session.get(
-            FEED_URL,
-            params={
-                "categoryId": int(category_id),
-                "size": max_results,
-                "page": 0,
-            },
-            headers={"version": "2"},
+
+        # The feed API endpoint is a plain JSON service without anti-bot
+        # protection, so we use the lightweight Fetcher instead of
+        # StealthyFetcher.
+        params = urlencode({
+            "categoryId": int(category_id),
+            "size": max_results,
+            "page": 0,
+        })
+        api_page = Fetcher.get(
+            f"{FEED_URL}?{params}",
             timeout=timeout,
         )
-        response.raise_for_status()
-        jobs = list((response.json() or {}).get("data") or [])
+        # Fetcher returns an Adaptor; extract text for JSON parsing.
+        raw_text = api_page.get_all_text(strip=True)
+        try:
+            api_data = json.loads(raw_text) or {}
+        except (json.JSONDecodeError, TypeError):
+            api_data = {}
+        jobs = list(api_data.get("data") or [])
         rows.extend(_job_row(job) for job in jobs[:max_results])
     return frame(rows)

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import requests
-from bs4 import BeautifulSoup
+from scrapling.parser import Adaptor
 
 from .common import frame
 
@@ -107,8 +107,8 @@ def _comment_row(comment: dict[str, Any]) -> dict[str, Any] | None:
     raw_html = str(comment.get("text") or "")
     if not raw_html or comment.get("deleted") or comment.get("dead"):
         return None
-    soup = BeautifulSoup(raw_html, "html.parser")
-    text = soup.get_text("\n", strip=True)
+    adaptor = Adaptor(raw_html, auto_match=False)
+    text = adaptor.get_all_text(separator="\n", strip=True)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines:
         return None

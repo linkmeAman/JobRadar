@@ -72,13 +72,13 @@ JobSpy providers are called independently so one provider failure does not
 discard results from another. Indeed searches require `country_indeed` and
 must not combine `hours_old` with both `job_type` and `is_remote`.
 
-External adapters feed the same DataFrame and matching pipeline:
+External adapters feed the same DataFrame and matching pipeline using the Scrapling framework:
 
-- HN Who's Hiring: at most every 12 hours.
-- Cutshort: at most every 6 hours.
-- Hirist: at most every 6 hours.
+- HN Who's Hiring: Firebase/Algolia JSON API + Scrapling `Adaptor` for comment text HTML parsing (at most every 12 hours).
+- Cutshort: Scrapling `Fetcher` with DOM selector relocation tracking (at most every 6 hours).
+- Hirist: Scrapling `StealthyFetcher` with headless browser fingerprinting to bypass Cloudflare Turnstile on category pages (at most every 6 hours).
 
-Source attempt times, results, errors, and HTTP 429 cooldowns are persisted.
+Source attempt times, results, errors, adaptive re-locate events (`scraper_health`), and HTTP 429 cooldowns are persisted.
 
 ## Matching
 
@@ -120,6 +120,7 @@ after the configured retention period.
 - `schema_version`: migration version;
 - `provider_state`: result state, rate-limit cooldowns, and zero-result streaks;
 - `runtime_state`: search/source cursors, Telegram offset, and reminders;
+- `scraper_health`: adaptive re-locate and zero-result health event records;
 - `scrape_runs`: timing, provider outcomes, counts, errors, and health alerts.
 
 ## Telegram

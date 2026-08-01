@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import requests
-from bs4 import BeautifulSoup, Tag
-
+from .. import scrape_state
 from .common import frame
+from scrapling import Fetcher
+from scrapling.parser import Adaptor
 
 
 _JOB_LINK = re.compile(r"^https?://(?:www\.)?cutshort\.io/job/")
@@ -19,37 +19,50 @@ _SALARY = re.compile(
 )
 
 
-def _card_for(anchor: Tag) -> Tag | None:
-    for parent in anchor.parents:
-        if not isinstance(parent, Tag) or parent.name != "div":
+def _is_job_link(href: str | None) -> bool:
+    return bool(href and _JOB_LINK.match(str(href)))
+
+
+def _css_first(node: Adaptor, selector: str) -> Adaptor | None:
+    """Return the first CSS match or None (Scrapling has no css_first)."""
+    results = node.css(selector)
+    return results[0] if results else None
+
+
+def _card_for(anchor: Adaptor) -> Adaptor | None:
+    for parent in anchor.iterancestors():
+        if parent.tag != "div":
             continue
-        text = parent.get_text(" ", strip=True)
+        text = parent.get_all_text(separator=" ", strip=True)
         job_links = [
             link
-            for link in parent.find_all("a", href=True)
-            if _JOB_LINK.match(str(link["href"]))
+            for link in parent.css("a[href]")
+            if _is_job_link(link.attrib.get("href"))
         ]
         if (
             len(job_links) == 1
             and _EXPERIENCE.search(text)
-            and parent.find("noscript") is not None
+            and _css_first(parent, "noscript") is not None
         ):
             return parent
     return None
 
 
-def _description(card: Tag) -> str:
+def _description(card: Adaptor) -> str:
     descriptions: list[str] = []
-    for element in card.find_all("noscript"):
-        parsed = BeautifulSoup(element.decode_contents(), "html.parser")
-        value = parsed.get_text(" ", strip=True)
+    for element in card.css("noscript"):
+        inner_html = element.html_content or ""
+        # html_content includes the outer tag; parse it to get inner text.
+        parsed = Adaptor(inner_html, auto_match=False)
+        value = parsed.get_all_text(separator=" ", strip=True)
         if value:
             descriptions.append(value)
     return max(descriptions, key=len, default="")[:12000]
 
 
-def _location(card: Tag) -> str | None:
-    values = list(card.stripped_strings)
+def _location(card: Adaptor) -> str | None:
+    text = card.get_all_text(separator="\n", strip=True)
+    values = [s.strip() for s in text.split("\n") if s.strip()]
     try:
         apply_position = values.index("Apply now")
     except ValueError:
@@ -62,17 +75,15 @@ def _location(card: Tag) -> str | None:
     return None
 
 
-def _job_row(anchor: Tag, card: Tag) -> dict[str, Any]:
-    title = anchor.get_text(" ", strip=True)
-    company_link = card.find(
-        "a", href=lambda value: bool(value and "/company/" in value)
-    )
+def _job_row(anchor: Adaptor, card: Adaptor) -> dict[str, Any]:
+    title = (anchor.text or "").strip()
+    company_link = _css_first(card, "a[href*='/company/']")
     company = (
-        company_link.get_text(" ", strip=True)
-        if company_link
+        (company_link.text or "").strip()
+        if company_link is not None
         else "Unknown company"
     )
-    text = card.get_text(" ", strip=True)
+    text = card.get_all_text(separator=" ", strip=True)
     location = _location(card)
     experience_match = _EXPERIENCE.search(text)
     minimum_years = (
@@ -94,7 +105,7 @@ def _job_row(anchor: Tag, card: Tag) -> dict[str, Any]:
         "city": location,
         "state": None,
         "country": "India",
-        "job_url": str(anchor["href"]),
+        "job_url": str(anchor.attrib.get("href", "")),
         "description": description,
         "is_remote": is_remote,
         "remote_restriction": None,
@@ -111,17 +122,26 @@ def scrape(
     session: requests.Session,
     timeout: int,
 ) -> Any:
-    """Fetch configured public Cutshort search pages."""
+    """Fetch configured public Cutshort search pages.
+
+    Uses Scrapling Fetcher for adaptive scraping.  The ``session`` parameter
+    is accepted for API compatibility but not used internally.
+    """
     rows: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
     max_results = max(1, int(settings.get("max_results_per_page", 20)))
+    relocate_events = 0
     for page_url in settings.get("pages") or []:
-        response = session.get(str(page_url), timeout=timeout)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+        page = Fetcher.get(
+            str(page_url),
+            timeout=timeout,
+        )
         added = 0
-        for anchor in soup.find_all("a", href=_JOB_LINK):
-            job_url = str(anchor["href"])
+        for anchor in page.css("a[href]"):
+            href = anchor.attrib.get("href")
+            if not _is_job_link(href):
+                continue
+            job_url = str(href)
             if job_url in seen_urls:
                 continue
             card = _card_for(anchor)
@@ -133,7 +153,15 @@ def scrape(
             if added >= max_results:
                 break
         if added == 0:
+            # Record a health event — Scrapling may have failed to locate
+            # elements adaptively, or the page structure changed significantly.
+            relocate_events += 1
+            scrape_state.record_scraper_health_event(
+                "cutshort", f"zero_results:{page_url}"
+            )
             raise RuntimeError(
                 f"Cutshort returned no parseable job cards: {page_url}"
             )
+    if relocate_events > 0:
+        scrape_state.check_adaptive_degradation("cutshort")
     return frame(rows)

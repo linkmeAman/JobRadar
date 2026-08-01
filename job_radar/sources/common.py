@@ -8,6 +8,15 @@ from typing import Any
 
 import pandas as pd
 
+# Fix Scrapling 0.4.12 hardcoded Chromium version 149 exceeding browserforge header dataset bounds (141)
+try:
+    import scrapling.engines.toolbelt.fingerprints as _scrapling_fp
+
+    _scrapling_fp.chromium_version = 141
+    _scrapling_fp.chrome_version = 141
+except (ImportError, AttributeError):
+    pass
+
 
 JOB_COLUMNS = (
     "title",

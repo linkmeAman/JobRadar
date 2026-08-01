@@ -586,3 +586,60 @@ def current_failure_streak_alerted() -> bool:
         if alerted:
             return True
     return False
+
+
+def record_scraper_health_event(
+    source: str, event: str, now: datetime | None = None
+) -> None:
+    """Insert a row into scraper_health when Scrapling triggers an adaptive re-locate."""
+    connection = _connect()
+    try:
+        with connection:
+            connection.execute(
+                "INSERT INTO scraper_health (source, event, ts) VALUES (?, ?, ?)",
+                (source, event, (now or _now()).isoformat()),
+            )
+    finally:
+        connection.close()
+
+
+def check_adaptive_degradation(
+    source: str, threshold: int = 3, now: datetime | None = None
+) -> bool:
+    """Return True and log a warning if adaptive re-locate events for one source
+    in the current run exceed the threshold — a degradation signal.
+
+    Phase 1: warning only, no alert delivery.
+    """
+    if not DATABASE_PATH.exists():
+        return False
+    connection = _connect(read_only=True)
+    try:
+        if not connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'scraper_health'
+            """
+        ).fetchone():
+            return False
+        cutoff = ((now or _now()) - timedelta(minutes=30)).isoformat()
+        row = connection.execute(
+            "SELECT COUNT(*) FROM scraper_health WHERE source = ? AND ts >= ?",
+            (source, cutoff),
+        ).fetchone()
+        count = int(row[0]) if row else 0
+        if count >= threshold:
+            import logging
+
+            logging.getLogger("job_radar.scrape_state").warning(
+                "adaptive degradation: source=%s relocate_events=%d in last 30min "
+                "(threshold=%d) — DOM structure may be unstable",
+                source,
+                count,
+                threshold,
+            )
+            return True
+        return False
+    finally:
+        connection.close()
+
