@@ -63,6 +63,7 @@ def run_all(
     cooldown_minutes: int = 120,
     max_cooldown_minutes: int = 720,
     *,
+    max_posting_age_days: int = 14,
     persist_state: bool = True,
     return_report: bool = False,
 ) -> pd.DataFrame | ScrapeOutcome:
@@ -122,6 +123,14 @@ def run_all(
 
             site_search = dict(search)
             site_search["site_name"] = [site]
+            if "hours_old" not in site_search:
+                if not (
+                    site == "indeed"
+                    and site_search.get("job_type")
+                    and site_search.get("is_remote")
+                ):
+                    site_search["hours_old"] = max_posting_age_days * 24
+
             try:
                 _validate_search(site_search)
                 params = {

@@ -278,3 +278,31 @@ class SourceRunnerTests(unittest.TestCase):
         self.assertEqual(
             result.provider_status["cutshort"]["status"], "success"
         )
+
+
+class FreshnessFilterTests(unittest.TestCase):
+    def test_is_within_window_date_filtering(self) -> None:
+        from datetime import datetime, timezone, timedelta
+        from job_radar.sources import is_within_window
+
+        now = datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+        # Recent ISO string (3 days old)
+        self.assertTrue(is_within_window("2026-07-29T12:00:00Z", 14, now=now))
+
+        # Old ISO string (20 days old)
+        self.assertFalse(is_within_window("2026-07-10T12:00:00Z", 14, now=now))
+
+        # None / missing date returns True
+        self.assertTrue(is_within_window(None, 14, now=now))
+
+        # Timestamp in seconds
+        ts_recent = (now - timedelta(days=5)).timestamp()
+        ts_old = (now - timedelta(days=20)).timestamp()
+        self.assertTrue(is_within_window(ts_recent, 14, now=now))
+        self.assertFalse(is_within_window(ts_old, 14, now=now))
+
+        # Timestamp in milliseconds
+        self.assertTrue(is_within_window(ts_recent * 1000, 14, now=now))
+        self.assertFalse(is_within_window(ts_old * 1000, 14, now=now))
+

@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from .. import scrape_state
+from . import is_within_window
 from .common import frame
 from scrapling import Fetcher
 from scrapling.parser import Adaptor
@@ -164,4 +165,8 @@ def scrape(
             )
     if relocate_events > 0:
         scrape_state.check_adaptive_degradation("cutshort")
-    return frame(rows)
+    max_age_days = int(settings.get("max_posting_age_days", 14))
+    filtered_rows = [
+        r for r in rows if is_within_window(r.get("date_posted"), max_age_days)
+    ]
+    return frame(filtered_rows)

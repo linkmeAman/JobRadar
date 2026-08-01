@@ -153,6 +153,16 @@ _TABLES = {
             ts DATETIME NOT NULL
         )
     """,
+    "discovered_companies": """
+        CREATE TABLE IF NOT EXISTS discovered_companies (
+            provider TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            company_name TEXT,
+            discovered_at TEXT NOT NULL,
+            last_scraped_at TEXT,
+            PRIMARY KEY(provider, slug)
+        )
+    """,
 }
 
 _MISSING_COLUMNS = {

@@ -10,6 +10,7 @@ from typing import Any
 import requests
 from scrapling.parser import Adaptor
 
+from . import is_within_window
 from .common import frame
 
 
@@ -171,7 +172,10 @@ def scrape(
                 comment_ids,
             )
         )
+    max_age_days = int(settings.get("max_posting_age_days", 14))
     rows = [
-        row for row in (_comment_row(comment) for comment in comments) if row
+        row
+        for row in (_comment_row(comment) for comment in comments)
+        if row and is_within_window(row.get("date_posted"), max_age_days)
     ]
     return frame(rows)

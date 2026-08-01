@@ -191,6 +191,7 @@ def run(
         all_failed = False
         try:
             scraping = config["scraping"]
+            max_age_days = int(scraping.get("max_posting_age_days", 14))
             outcome = scraper.run_all(
                 selected,
                 cooldown_minutes=int(
@@ -199,6 +200,7 @@ def run(
                 max_cooldown_minutes=int(
                     scraping.get("max_cooldown_minutes", 720)
                 ),
+                max_posting_age_days=max_age_days,
                 persist_state=not dry_run,
                 return_report=True,
             )
@@ -206,8 +208,14 @@ def run(
                 outcome = scraper.ScrapeOutcome(
                     jobs=outcome, provider_status={}
                 )
+            external_config = dict(config.get("external_sources", {}))
+            if "ats_companies" in config:
+                external_config["ats_companies"] = config["ats_companies"]
+            if "searches" in config:
+                external_config["searches"] = config["searches"]
+            external_config["max_posting_age_days"] = max_age_days
             external_outcome = source_runner.run_all(
-                config.get("external_sources", {}),
+                external_config,
                 persist_state=not dry_run,
                 force=dry_run,
             )

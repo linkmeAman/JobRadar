@@ -10,7 +10,7 @@ import requests
 
 from .. import scrape_state
 from ..scraper import ScrapeOutcome
-from . import cutshort, hacker_news, hirist
+from . import ats_apis, cutshort, discovery, hacker_news, hirist
 from .common import frame
 
 
@@ -19,6 +19,8 @@ ADAPTERS: dict[str, Adapter] = {
     "hn_whos_hiring": hacker_news.scrape,
     "cutshort": cutshort.scrape,
     "hirist": hirist.scrape,
+    "ats_apis": ats_apis.scrape,
+    "discovery": discovery.scrape,
 }
 
 
@@ -56,8 +58,15 @@ def run_all(
     base_cooldown = int(config.get("cooldown_minutes", 120))
     max_cooldown = int(config.get("max_cooldown_minutes", 720))
 
+    max_posting_age_days = int(config.get("max_posting_age_days", 14))
+
     for name in configured_names(config):
         settings = dict(config["sources"][name])
+        settings.setdefault("max_posting_age_days", max_posting_age_days)
+        if "ats_companies" in config and "ats_companies" not in settings:
+            settings["ats_companies"] = config["ats_companies"]
+        if "searches" in config and "searches" not in settings:
+            settings["searches"] = config["searches"]
         interval = float(settings.get("interval_hours", 6))
         if not force and not scrape_state.source_due(
             name, interval, read_only=not persist_state

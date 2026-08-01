@@ -643,3 +643,76 @@ def check_adaptive_degradation(
     finally:
         connection.close()
 
+
+def get_discovered_companies() -> list[dict[str, Any]]:
+    """Return all cached discovered ATS companies from SQLite."""
+    if not DATABASE_PATH.exists():
+        return []
+    connection = _connect(read_only=True)
+    try:
+        if not connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'discovered_companies'
+            """
+        ).fetchone():
+            return []
+        rows = connection.execute(
+            "SELECT provider, slug, company_name FROM discovered_companies"
+        ).fetchall()
+        return [
+            {"provider": row[0], "slug": row[1], "name": row[2]}
+            for row in rows
+        ]
+    finally:
+        connection.close()
+
+
+def save_discovered_company(
+    provider: str,
+    slug: str,
+    company_name: str | None = None,
+    now: datetime | None = None,
+) -> None:
+    """Save a newly discovered ATS company slug to SQLite."""
+    if not provider or not slug:
+        return
+    current = (now or _now()).isoformat()
+    connection = _connect()
+    try:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO discovered_companies (provider, slug, company_name, discovered_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(provider, slug) DO UPDATE SET
+                    company_name = COALESCE(excluded.company_name, discovered_companies.company_name)
+                """,
+                (provider.lower().strip(), slug.lower().strip(), company_name, current),
+            )
+    finally:
+        connection.close()
+
+
+def is_company_discovered(provider: str, slug: str) -> bool:
+    """Check if an ATS company slug has already been discovered."""
+    if not DATABASE_PATH.exists():
+        return False
+    connection = _connect(read_only=True)
+    try:
+        if not connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'discovered_companies'
+            """
+        ).fetchone():
+            return False
+        row = connection.execute(
+            "SELECT 1 FROM discovered_companies WHERE provider = ? AND slug = ?",
+            (provider.lower().strip(), slug.lower().strip()),
+        ).fetchone()
+        return bool(row)
+    finally:
+        connection.close()
+
+

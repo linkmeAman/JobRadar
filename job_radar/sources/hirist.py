@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from .. import scrape_state
+from . import is_within_window
 from .common import frame, slugify, utc_from_milliseconds
 from scrapling import Fetcher, StealthyFetcher
 from scrapling.parser import Adaptor
@@ -139,4 +140,8 @@ def scrape(
             api_data = {}
         jobs = list(api_data.get("data") or [])
         rows.extend(_job_row(job) for job in jobs[:max_results])
-    return frame(rows)
+    max_age_days = int(settings.get("max_posting_age_days", 14))
+    filtered_rows = [
+        r for r in rows if is_within_window(r.get("date_posted"), max_age_days)
+    ]
+    return frame(filtered_rows)

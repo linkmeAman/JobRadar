@@ -8,6 +8,7 @@ scraping:
   searches_per_run: 4
   cooldown_minutes: 120
   max_cooldown_minutes: 720
+  max_posting_age_days: 14
 
 dynamic_searches:
   # Rebuilt from the latest resume roles and strongest skills each run.
@@ -117,6 +118,25 @@ external_sources:
           page_url: "https://www.hirist.tech/c/backend-development-jobs"
         - name: ai_ml
           page_url: "https://www.hirist.tech/c/ai-ml-jobs"
+
+    ats_apis:
+      enabled: true
+      interval_hours: 6
+
+    discovery:
+      enabled: true
+      interval_hours: 6
+
+ats_companies:
+  - name: "Postman"
+    provider: "lever"
+    slug: "postman"
+  - name: "Stripe"
+    provider: "greenhouse"
+    slug: "stripe"
+  - name: "Linear"
+    provider: "ashby"
+    slug: "linear"
 
 searches:
   # Resume-aligned backend searches.
