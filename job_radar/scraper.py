@@ -63,6 +63,7 @@ def run_all(
     cooldown_minutes: int = 120,
     max_cooldown_minutes: int = 720,
     *,
+    empty_run_circuit_breaker: int = 6,
     max_posting_age_days: int = 14,
     persist_state: bool = True,
     return_report: bool = False,
@@ -141,12 +142,22 @@ def run_all(
                 jobs = scrape_jobs(**params)
 
                 if jobs is None or jobs.empty:
+                    cooldown_end = None
                     if persist_state:
-                        scrape_state.record_success(site, 0)
+                        cooldown_end = scrape_state.record_success(
+                            site,
+                            0,
+                            base_cooldown_minutes=cooldown_minutes,
+                            max_cooldown_minutes=max_cooldown_minutes,
+                            empty_run_circuit_breaker=empty_run_circuit_breaker,
+                        )
+                    if cooldown_end is not None:
+                        blocked_sites.add(site)
                     state = state_for(site)
-                    state["status"] = "success"
+                    current_st = "blocked_empty" if cooldown_end else "success"
+                    state["status"] = current_st
                     state["searches"][name] = {
-                        "status": "success",
+                        "status": current_st,
                         "results": 0,
                     }
                     print(f"search={name} site={site} scraped=0")
@@ -160,7 +171,13 @@ def run_all(
 
                 results.append(jobs)
                 if persist_state:
-                    scrape_state.record_success(site, len(jobs))
+                    scrape_state.record_success(
+                        site,
+                        len(jobs),
+                        base_cooldown_minutes=cooldown_minutes,
+                        max_cooldown_minutes=max_cooldown_minutes,
+                        empty_run_circuit_breaker=empty_run_circuit_breaker,
+                    )
                 state = state_for(site)
                 state["status"] = "success"
                 state["results"] = int(state["results"]) + len(jobs)

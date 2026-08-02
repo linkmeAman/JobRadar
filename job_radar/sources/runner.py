@@ -96,17 +96,25 @@ def run_all(
 
         if persist_state:
             scrape_state.record_source_attempt(name)
+        empty_breaker = int(config.get("empty_run_circuit_breaker", 6))
         try:
             jobs = ADAPTERS[name](settings, session, timeout)
             if not jobs.empty:
                 results.append(jobs)
+            cooldown_end = None
+            if persist_state:
+                cooldown_end = scrape_state.record_success(
+                    name,
+                    len(jobs),
+                    base_cooldown_minutes=base_cooldown,
+                    max_cooldown_minutes=max_cooldown,
+                    empty_run_circuit_breaker=empty_breaker,
+                )
             status[name] = {
-                "status": "success",
+                "status": "blocked_empty" if cooldown_end else "success",
                 "results": len(jobs),
                 "interval_hours": interval,
             }
-            if persist_state:
-                scrape_state.record_success(name, len(jobs))
             print(f"source={name} scraped={len(jobs)}")
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"

@@ -9,6 +9,8 @@ scraping:
   cooldown_minutes: 120
   max_cooldown_minutes: 720
   max_posting_age_days: 14
+  empty_run_circuit_breaker: 6
+
 
 dynamic_searches:
   # Rebuilt from the latest resume roles and strongest skills each run.

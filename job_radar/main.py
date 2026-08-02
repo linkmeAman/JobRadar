@@ -363,25 +363,43 @@ def _maybe_send_health_alert(
 def _maybe_send_provider_alert(
     config: dict[str, Any], provider_status: dict[str, Any]
 ) -> None:
-    threshold = int(
+    failure_threshold = int(
         config.get("monitoring", {}).get("provider_failure_alert_runs", 3)
     )
-    degraded = scrape_state.degraded_providers(provider_status, threshold)
-    if not degraded:
-        return
-    details = "; ".join(
-        f"{item['provider']} ({item['failures']} runs, {item['status']})"
-        + (f": {item['error']}" if item.get("error") else "")
-        for item in degraded
+    empty_threshold = int(
+        config.get("scraping", {}).get(
+            "empty_run_circuit_breaker",
+            config.get("monitoring", {}).get("empty_run_circuit_breaker", 6),
+        )
     )
-    try:
-        notifier.send_health_alert(f"Provider degradation: {details}")
-    except RuntimeError as exc:
-        logging.error("provider_health_alert=failed error=%s", exc)
-        return
-    scrape_state.mark_provider_alert_sent(
-        [str(item["provider"]) for item in degraded]
+    degraded = scrape_state.degraded_providers(
+        provider_status, failure_threshold, empty_threshold=empty_threshold
     )
+    _, recovered = scrape_state.evaluate_provider_alert_transitions(
+        provider_status, failure_threshold, empty_threshold=empty_threshold
+    )
+
+    if degraded:
+        details = "; ".join(
+            f"{item['provider']} ({item['failures']} runs, {item['status']})"
+            + (f": {item['error']}" if item.get("error") else "")
+            for item in degraded
+        )
+        try:
+            notifier.send_health_alert(f"Provider degradation: {details}")
+            scrape_state.mark_provider_alert_sent(
+                [str(item["provider"]) for item in degraded]
+            )
+        except RuntimeError as exc:
+            logging.error("provider_health_alert=failed error=%s", exc)
+
+    if recovered:
+        names = ", ".join(sorted(str(name) for name in recovered))
+        try:
+            notifier.send_health_alert(f"Provider recovered: {names}")
+            scrape_state.mark_provider_recovered(recovered)
+        except RuntimeError as exc:
+            logging.error("provider_recovery_alert=failed error=%s", exc)
 
 
 def _parser() -> argparse.ArgumentParser:

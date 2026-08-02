@@ -141,3 +141,21 @@ class NotifierTests(unittest.TestCase):
             post.call_args.kwargs["json"],
             {"callback_query_id": "callback-1", "text": "Saved"},
         )
+
+    def test_provider_degradation_and_recovery_alerts(self) -> None:
+        with patch(
+            "job_radar.notifier.requests.post",
+            return_value=FakeResponse(200, {"ok": True}),
+        ) as post:
+            notifier.send_provider_degradation_alert("linkedin (3 runs, failure)")
+            self.assertIn(
+                "Provider degradation: linkedin (3 runs, failure)",
+                post.call_args.kwargs["json"]["text"],
+            )
+
+            notifier.send_provider_recovery_alert(["linkedin"])
+            self.assertIn(
+                "Provider recovered: linkedin",
+                post.call_args.kwargs["json"]["text"],
+            )
+

@@ -176,3 +176,133 @@ class ScrapeStateTests(unittest.TestCase):
             all_providers_failed=False,
         )
         self.assertEqual(scrape_state.degraded_providers(status, 3), [])
+
+    def test_consecutive_empty_runs_counter_and_circuit_breaker_cooldown(self) -> None:
+        start = datetime(2026, 7, 27, tzinfo=timezone.utc)
+        run_id = scrape_state.start_run([{"name": "google"}])
+        scrape_state.complete_run(
+            run_id,
+            started_at=start,
+            provider_status={"google": {"status": "success", "results": 15}},
+            scraped_count=15,
+            matched_count=0,
+            new_count=0,
+            pending_count=0,
+            queued_count=0,
+            deferred_count=0,
+            expired_count=0,
+            sent_count=0,
+            all_providers_failed=False,
+        )
+        self.assertEqual(scrape_state.provider_historical_median("google"), 15.0)
+
+        for _ in range(5):
+            end = scrape_state.record_success(
+                "google", 0, base_cooldown_minutes=120, max_cooldown_minutes=720, empty_run_circuit_breaker=6, now=start
+            )
+            self.assertIsNone(end)
+            self.assertIsNone(scrape_state.blocked_until("google", now=start))
+
+        tripped_end = scrape_state.record_success(
+            "google", 0, base_cooldown_minutes=120, max_cooldown_minutes=720, empty_run_circuit_breaker=6, now=start
+        )
+        self.assertIsNotNone(tripped_end)
+        self.assertEqual(tripped_end, start + timedelta(minutes=120))
+        self.assertEqual(
+            scrape_state.blocked_until("google", now=start + timedelta(minutes=30)),
+            tripped_end,
+        )
+
+        scrape_state.record_success("google", 5, now=start + timedelta(minutes=130))
+        self.assertIsNone(scrape_state.blocked_until("google", now=start + timedelta(minutes=131)))
+
+    def test_sparse_provider_does_not_trigger_empty_run_circuit_breaker(self) -> None:
+        start = datetime(2026, 7, 27, tzinfo=timezone.utc)
+        self.assertEqual(scrape_state.provider_historical_median("hirist"), 0.0)
+
+        for _ in range(10):
+            end = scrape_state.record_success(
+                "hirist", 0, base_cooldown_minutes=120, max_cooldown_minutes=720, empty_run_circuit_breaker=6, now=start
+            )
+            self.assertIsNone(end)
+
+        self.assertIsNone(scrape_state.blocked_until("hirist", now=start))
+
+    def test_alert_state_deduplication_and_recovery_transitions(self) -> None:
+        start = datetime(2026, 7, 27, tzinfo=timezone.utc)
+        run_id = scrape_state.start_run([{"name": "linkedin"}])
+        scrape_state.complete_run(
+            run_id,
+            started_at=start,
+            provider_status={"linkedin": {"status": "success", "results": 20}},
+            scraped_count=20,
+            matched_count=0,
+            new_count=0,
+            pending_count=0,
+            queued_count=0,
+            deferred_count=0,
+            expired_count=0,
+            sent_count=0,
+            all_providers_failed=False,
+        )
+
+        status_degraded = {"linkedin": {"status": "failure", "error": "HTTP 429"}}
+        for _ in range(3):
+            r_id = scrape_state.start_run([{"name": "linkedin"}])
+            scrape_state.record_failure("linkedin", "HTTP 429")
+            scrape_state.complete_run(
+                r_id,
+                started_at=start,
+                provider_status=status_degraded,
+                scraped_count=0,
+                matched_count=0,
+                new_count=0,
+                pending_count=0,
+                queued_count=0,
+                deferred_count=0,
+                expired_count=0,
+                sent_count=0,
+                all_providers_failed=True,
+            )
+
+        newly_deg, newly_rec = scrape_state.evaluate_provider_alert_transitions(status_degraded, failure_threshold=3)
+        self.assertEqual(len(newly_deg), 1)
+        self.assertEqual(newly_deg[0]["provider"], "linkedin")
+        self.assertEqual(newly_rec, [])
+
+        scrape_state.mark_provider_alert_sent(["linkedin"])
+        self.assertEqual(scrape_state.get_alert_state("linkedin"), "degraded")
+
+        newly_deg2, newly_rec2 = scrape_state.evaluate_provider_alert_transitions(status_degraded, failure_threshold=3)
+        self.assertEqual(newly_deg2, [])
+        self.assertEqual(newly_rec2, [])
+
+        status_healthy = {"linkedin": {"status": "success", "results": 25}}
+        rec_id = scrape_state.start_run([{"name": "linkedin"}])
+        scrape_state.record_success("linkedin", 25)
+        scrape_state.complete_run(
+            rec_id,
+            started_at=start,
+            provider_status=status_healthy,
+            scraped_count=25,
+            matched_count=0,
+            new_count=0,
+            pending_count=0,
+            queued_count=0,
+            deferred_count=0,
+            expired_count=0,
+            sent_count=0,
+            all_providers_failed=False,
+        )
+
+        newly_deg3, newly_rec3 = scrape_state.evaluate_provider_alert_transitions(status_healthy, failure_threshold=3)
+        self.assertEqual(newly_deg3, [])
+        self.assertEqual(newly_rec3, ["linkedin"])
+
+        scrape_state.mark_provider_recovered(["linkedin"])
+        self.assertEqual(scrape_state.get_alert_state("linkedin"), "healthy")
+
+        newly_deg4, newly_rec4 = scrape_state.evaluate_provider_alert_transitions(status_healthy, failure_threshold=3)
+        self.assertEqual(newly_deg4, [])
+        self.assertEqual(newly_rec4, [])
+

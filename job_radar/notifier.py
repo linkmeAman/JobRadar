@@ -312,3 +312,14 @@ def fetch_updates(offset: int | None = None) -> list[dict[str, Any]]:
 def send_health_alert(message: str) -> None:
     """Send one operational alert through the configured Telegram chat."""
     send_text(f"⚠️ Job Radar health alert\n{message}")
+
+
+def send_provider_degradation_alert(details: str) -> None:
+    """Send a provider degradation alert on transition from healthy to degraded."""
+    send_health_alert(f"Provider degradation: {details}")
+
+
+def send_provider_recovery_alert(provider_names: list[str]) -> None:
+    """Send a single provider recovered message on transition from degraded to healthy."""
+    names = ", ".join(sorted(provider_names))
+    send_health_alert(f"Provider recovered: {names}")

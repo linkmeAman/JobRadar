@@ -56,6 +56,8 @@ _TABLES = {
             consecutive_failures INTEGER NOT NULL DEFAULT 0,
             failure_alert_sent INTEGER NOT NULL DEFAULT 0,
             consecutive_empty_results INTEGER NOT NULL DEFAULT 0,
+            consecutive_empty_runs INTEGER NOT NULL DEFAULT 0,
+            alert_state TEXT NOT NULL DEFAULT 'healthy',
             last_status TEXT,
             last_result_count INTEGER,
             updated_at TEXT NOT NULL
@@ -186,6 +188,8 @@ _MISSING_COLUMNS = {
         "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
         "failure_alert_sent": "INTEGER NOT NULL DEFAULT 0",
         "consecutive_empty_results": "INTEGER NOT NULL DEFAULT 0",
+        "consecutive_empty_runs": "INTEGER NOT NULL DEFAULT 0",
+        "alert_state": "TEXT NOT NULL DEFAULT 'healthy'",
     },
     "scrape_runs": {"health_alert_sent": "INTEGER NOT NULL DEFAULT 0"},
 }

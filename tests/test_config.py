@@ -17,7 +17,8 @@ class ConfigTests(unittest.TestCase):
 
     def test_thirty_minute_timer_expression(self) -> None:
         timer = Path("deploy/job-radar.timer").read_text(encoding="utf-8")
-        self.assertIn("OnCalendar=*-*-* *:00/30:00", timer)
+        self.assertIn("OnUnitActiveSec=30min", timer)
+        self.assertIn("RandomizedDelaySec=300", timer)
 
     def test_docker_runtime_files_and_cadence(self) -> None:
         self.assertTrue(Path("Dockerfile").is_file())

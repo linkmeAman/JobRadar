@@ -2,7 +2,8 @@
 Description=Run Job Radar every 30 minutes
 
 [Timer]
-OnCalendar=*-*-* *:00/30:00
+OnUnitActiveSec=30min
+RandomizedDelaySec=300
 Persistent=true
 
 [Install]
