@@ -1,6 +1,6 @@
 # Job Radar Technical Reference
 
-Job Radar is a Python 3.10+ scheduled job-discovery pipeline. It builds
+Job Radar is a Python 3.10–3.12 scheduled job-discovery pipeline. It builds
 resume-aligned searches, gathers listings from multiple providers, ranks and
 deduplicates them, sends Telegram alerts, and tracks applications in SQLite.
 
