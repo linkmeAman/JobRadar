@@ -1,4 +1,8 @@
 python-jobspy==1.1.82
+# JobSpy depends on these transitively. Keep their Python 3.14+ compatible
+# releases explicit so fresh Docker and local environments resolve consistently.
+numpy>=2.3
+pandas>=3.0
 PyYAML==6.0.3
 requests==2.34.2
 pypdf==6.14.2

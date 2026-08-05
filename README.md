@@ -1,6 +1,6 @@
 # Job Radar
 
-Job Radar is a Python 3.10–3.12 automation that builds searches from the latest
+Job Radar is a Python 3.14+ automation that builds searches from the latest
 resume, scrapes JobSpy providers independently, ranks listings, deduplicates
 them in SQLite, and sends the strongest new matches through Telegram. It runs
 to completion every 30 minutes under systemd. A small localhost-only UI is
@@ -95,13 +95,23 @@ writes, and run-history writes.
 
 ## Setup
 
-Create a Python 3.10–3.12 virtual environment and install the pinned project
-dependencies. Python 3.14 is not compatible with JobSpy's pinned NumPy 1.26
-dependency.
+Create a Python 3.14 or later virtual environment and install the project
+dependencies. The requirements select current NumPy and pandas releases that
+support Python 3.14+.
+
+### Linux / macOS
 
 ```bash
-python3 -m venv .venv
+python3.14 -m venv .venv
 . .venv/bin/activate
+pip install -U -r requirements.txt
+```
+
+### Windows
+
+```cmd
+py -3.14 -m venv .venv
+.venv\Scripts\activate
 pip install -U -r requirements.txt
 ```
 
@@ -586,6 +596,9 @@ journalctl -u job-radar-web.service -n 100 --no-pager
   Telegram does not allow webhook delivery and `getUpdates` polling together.
 - `provider_health_alert=failed`: verify Telegram credentials; provider alerts
   are retried on a later run and are not marked sent until delivery succeeds.
+- `ModuleNotFoundError: No module named 'pandas'`: re-create the Python 3.14+
+  virtual environment (for example, `python3.14 -m venv .venv`) and re-run
+  `pip install -U -r requirements.txt`.
 - `OPENAI_API_KEY must be set`: semantic scoring was enabled without a key.
 
 Keep `.env`, `data/jobs.db`, `data/resume_profile.json`, and resume PDFs private.
