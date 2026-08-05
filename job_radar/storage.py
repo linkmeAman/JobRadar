@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _TABLES = {
     "seen_jobs": """
@@ -163,6 +163,16 @@ _TABLES = {
             discovered_at TEXT NOT NULL,
             last_scraped_at TEXT,
             PRIMARY KEY(provider, slug)
+        )
+    """,
+    "aman_os_sync": """
+        CREATE TABLE IF NOT EXISTS aman_os_sync (
+            job_id TEXT PRIMARY KEY,
+            payload_hash TEXT NOT NULL,
+            synced_at TEXT NOT NULL,
+            last_attempt_at TEXT NOT NULL,
+            last_error TEXT,
+            FOREIGN KEY(job_id) REFERENCES seen_jobs(job_id)
         )
     """,
 }

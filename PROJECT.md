@@ -12,8 +12,9 @@ resume PDFs
   -> rotating JobSpy searches
   -> scheduled external source adapters
   -> deterministic and optional semantic scoring
-  -> URL-aware deduplication
-  -> ranked Telegram notifications
+-> URL-aware deduplication
+  -> retry-safe Aman OS preparation import
+-> ranked Telegram notifications
   -> application follow-up tracking
   -> run history
 ```
@@ -21,6 +22,15 @@ resume PDFs
 The process runs to completion every 30 minutes under systemd or the Docker
 scheduler. A filesystem lock prevents scheduled and manual runs from
 overlapping.
+
+## Aman OS bridge
+
+Job Radar remains responsible for discovery, source crawling, deduplication,
+and Telegram alerts. Aman OS receives matched listings over its authenticated
+import API and owns evidence matching, study preparation, resume tailoring,
+and interview work. The sender uses Job Radar's URL-derived identity as the
+external ID, stores only a payload hash, timestamp, and bounded error locally,
+and retries failed or changed records without affecting Telegram delivery.
 
 ```mermaid
 flowchart LR

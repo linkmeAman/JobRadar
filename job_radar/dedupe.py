@@ -390,6 +390,96 @@ def pending_notifications(limit: int | None = None) -> pd.DataFrame:
     return pending.reset_index(drop=True)
 
 
+def aman_os_sync_candidates(limit: int = 100) -> pd.DataFrame:
+    """Return persisted roles not yet synchronized with Aman OS.
+
+    A payload hash makes changed, still-active source records eligible again
+    without creating a second Job Radar identity or resending Telegram alerts.
+    """
+    if limit <= 0 or not DATABASE_PATH.exists():
+        return pd.DataFrame()
+
+    connection = _connect()
+    try:
+        _initialize_schema(connection)
+        rows = connection.execute(
+            """
+            SELECT s.job_id, s.notification_payload, sync.payload_hash
+            FROM seen_jobs AS s
+            LEFT JOIN aman_os_sync AS sync ON sync.job_id = s.job_id
+            WHERE s.is_active = 1
+              AND s.notification_payload IS NOT NULL
+            ORDER BY s.first_seen_at, s.rowid
+            """,
+        ).fetchall()
+    finally:
+        connection.close()
+
+    candidates = []
+    for job_id, payload, stored_hash in rows:
+        payload_hash = hashlib.sha256(str(payload).encode("utf-8")).hexdigest()
+        if stored_hash == payload_hash:
+            continue
+        try:
+            record = json.loads(payload)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        record["job_id"] = job_id
+        record["aman_os_payload_hash"] = payload_hash
+        candidates.append(record)
+        if len(candidates) >= limit:
+            break
+    return pd.DataFrame(candidates)
+
+
+def mark_aman_os_synced(job_ids: list[str], payload_hashes: dict[str, str]) -> None:
+    """Persist successful Aman OS delivery without storing credentials."""
+    if not job_ids:
+        return
+    connection = _connect()
+    try:
+        _initialize_schema(connection)
+        with connection:
+            connection.executemany(
+                """
+                INSERT INTO aman_os_sync
+                    (job_id, payload_hash, synced_at, last_attempt_at, last_error)
+                VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    payload_hash = excluded.payload_hash,
+                    synced_at = CURRENT_TIMESTAMP,
+                    last_attempt_at = CURRENT_TIMESTAMP,
+                    last_error = NULL
+                """,
+                [(job_id, payload_hashes[job_id]) for job_id in job_ids],
+            )
+    finally:
+        connection.close()
+
+
+def record_aman_os_sync_error(job_ids: list[str], error: str) -> None:
+    """Record a bounded delivery error while retaining every candidate to retry."""
+    if not job_ids:
+        return
+    connection = _connect()
+    try:
+        _initialize_schema(connection)
+        with connection:
+            connection.executemany(
+                """
+                INSERT INTO aman_os_sync
+                    (job_id, payload_hash, synced_at, last_attempt_at, last_error)
+                VALUES (?, '', '', CURRENT_TIMESTAMP, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    last_attempt_at = CURRENT_TIMESTAMP,
+                    last_error = excluded.last_error
+                """,
+                [(job_id, error[:500]) for job_id in job_ids],
+            )
+    finally:
+        connection.close()
+
+
 def expire_pending(days: int) -> int:
     """Expire undelivered jobs older than the configured retry window."""
     if days <= 0 or not DATABASE_PATH.exists():

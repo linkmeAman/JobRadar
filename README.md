@@ -18,8 +18,9 @@ resume PDFs
   -> deterministic exclusions and relevance score
   -> optional semantic score for borderline jobs
   -> normalized-URL dedupe with legacy-ID migration
-  -> ranked pending queue with seven-day expiry
-  -> one Telegram message per job
+-> ranked pending queue with seven-day expiry
+  -> retry-safe Aman OS preparation import
+-> one Telegram message per job
   -> scrape_runs audit record
 ```
 
@@ -233,6 +234,26 @@ The summary fields are:
 - `deferred`: notifications retained for a later run;
 - `expired`: old pending notifications retired this run;
 - `sent`: messages Telegram accepted.
+
+## Aman OS bridge
+
+Job Radar remains the only discovery, source-crawling, and Telegram-alert
+system. Aman OS receives the same matched job once, then owns JD matching
+against your evidence, study plans, resume drafts, and interview preparation.
+
+To activate the bridge, open **Aman OS → Career Studio → Market pulse → Job
+Radar bridge**, generate a key, and add the displayed key to the local `.env`:
+
+```bash
+AMAN_OS_ENDPOINT=https://aman-career-os.tickle-right-2344.chatgpt.site/api/job-radar
+AMAN_OS_API_KEY=aman_jr_...
+```
+
+The sender runs after Job Radar persists a matched listing and before Telegram
+notifications. It uses the existing URL-derived Job Radar ID as Aman OS's
+idempotency key. SQLite records successful payload hashes and retries only
+failed or changed records on later runs. A bridge outage is logged and never
+prevents scraping, local persistence, or Telegram delivery.
 
 ## Matching and feedback
 

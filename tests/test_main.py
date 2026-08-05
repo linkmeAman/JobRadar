@@ -37,6 +37,7 @@ def _config() -> dict:
         "dynamic_searches": {"enabled": True},
         "applications": {"enabled": True},
         "semantic": {"enabled": False},
+        "aman_os": {"enabled": True},
         "searches": [{"name": "one"}, {"name": "two"}],
     }
 
@@ -126,6 +127,8 @@ class MainTests(unittest.TestCase):
         ), patch(
             "job_radar.main.dedupe.filter_new", return_value=evaluated
         ), patch(
+            "job_radar.main.aman_os.sync_pending"
+        ) as sync_aman_os, patch(
             "job_radar.main.dedupe.expire_pending", return_value=0
         ), patch(
             "job_radar.main.dedupe.pending_notifications", return_value=pending
@@ -142,6 +145,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual(len(queued), 10)
         self.assertEqual(queued.iloc[0]["job_id"], "job-0")
         self.assertEqual(complete.call_args.kwargs["sent_count"], 10)
+        sync_aman_os.assert_called_once_with(config["aman_os"])
         application_automation.assert_called_once_with(
             config["applications"]
         )
@@ -195,6 +199,8 @@ class MainTests(unittest.TestCase):
         ) as start_run, patch(
             "job_radar.main.dedupe.filter_new"
         ) as filter_new, patch(
+            "job_radar.main.aman_os.sync_pending"
+        ) as sync_aman_os, patch(
             "job_radar.main.notifier.send_all"
         ) as send_all, patch(
             "job_radar.main.application_tracker.run_automation"
@@ -204,6 +210,7 @@ class MainTests(unittest.TestCase):
         validate.assert_not_called()
         start_run.assert_not_called()
         filter_new.assert_not_called()
+        sync_aman_os.assert_not_called()
         send_all.assert_not_called()
         application_automation.assert_not_called()
         self.assertFalse(run_all.call_args.kwargs["persist_state"])

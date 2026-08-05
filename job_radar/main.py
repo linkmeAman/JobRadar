@@ -13,6 +13,7 @@ import pandas as pd
 import yaml
 
 from . import (
+    aman_os,
     application_tracker,
     dedupe,
     matcher,
@@ -282,6 +283,7 @@ def run(
 
             new_jobs = dedupe.filter_new(matched)
             counts["new_count"] = len(new_jobs)
+            aman_os.sync_pending(config.get("aman_os", {}))
             counts["expired_count"] = dedupe.expire_pending(
                 int(config["matching"].get("pending_expiry_days", 7))
             )

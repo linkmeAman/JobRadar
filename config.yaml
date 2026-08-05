@@ -56,6 +56,13 @@ matching:
     - engineering manager
     - architect
 
+aman_os:
+  # Job Radar remains the discovery source; Aman OS receives matched jobs for
+  # role-specific preparation. Credentials stay only in .env.
+  enabled: true
+  batch_size: 50
+  timeout_seconds: 20
+
 monitoring:
   # Alert once per outage streak, after all selected providers have failed
   # this many consecutive scheduled runs.
