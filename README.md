@@ -1,6 +1,6 @@
 # Job Radar
 
-Job Radar is a Python 3.10+ automation that builds searches from the latest
+Job Radar is a Python 3.14+ automation that builds searches from the latest
 resume, scrapes JobSpy providers independently, ranks listings, deduplicates
 them in SQLite, and sends the strongest new matches through Telegram. It runs
 to completion every 30 minutes under systemd. A small localhost-only UI is
@@ -94,11 +94,21 @@ writes, and run-history writes.
 
 ## Setup
 
-Create a virtual environment and install the pinned project dependencies:
+Create a Python 3.14 virtual environment and install the pinned project dependencies:
+
+### Linux / macOS
 
 ```bash
-python3 -m venv .venv
+python3.14 -m venv .venv
 . .venv/bin/activate
+pip install -U -r requirements.txt
+```
+
+### Windows
+
+```cmd
+py -3.14 -m venv .venv
+.venv\Scripts\activate
 pip install -U -r requirements.txt
 ```
 
