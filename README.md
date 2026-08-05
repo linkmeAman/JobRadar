@@ -99,6 +99,7 @@ Create a Python 3.14 virtual environment and install the pinned project dependen
 ### Linux / macOS
 
 ```bash
+# Ensure Python 3.14 and dev headers are installed (e.g. sudo apt install python3.14 python3.14-dev)
 python3.14 -m venv .venv
 . .venv/bin/activate
 pip install -U -r requirements.txt
@@ -573,6 +574,7 @@ journalctl -u job-radar-web.service -n 100 --no-pager
   Telegram does not allow webhook delivery and `getUpdates` polling together.
 - `provider_health_alert=failed`: verify Telegram credentials; provider alerts
   are retried on a later run and are not marked sent until delivery succeeds.
+- `ModuleNotFoundError: No module named 'pandas'`: re-create the Python 3.14 virtual environment (`python3.14 -m venv .venv`) and re-run `pip install -U -r requirements.txt`.
 - `OPENAI_API_KEY must be set`: semantic scoring was enabled without a key.
 
 Keep `.env`, `data/jobs.db`, `data/resume_profile.json`, and resume PDFs private.
